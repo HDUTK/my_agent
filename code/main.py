@@ -26,13 +26,13 @@ from openai import AsyncOpenAI
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart
+
+from pydantic_ai.exceptions import ModelRetry
 
 # 导入mcp客户端组件
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
-
-# 导入模具
-from schemas import SensorRecord
 
 
 # 加载所有环境变量配置
@@ -146,8 +146,22 @@ def make_mcp_tool(session: ClientSession):
 
             return final_result
         except Exception as e:
-            print(f"[❌ 调用失败] {e}")
-            return f"工具调用失败: {str(e)}"
+            error_msg = str(e).lower()
+
+            # 🌟 诊断 1：如果是通讯/网络/超时问题 (可以根据实际的报错关键字调整)
+            if "timeout" in error_msg or "connection" in error_msg or "network" in error_msg or "mcp" in error_msg:
+                print(f"⚠️ [网络波动] 检测到通讯异常: {e}")
+                print(f"⏳ 正在扣减重试额度并请求大模型重试...")
+                # 抛出 ModelRetry
+                # Pydantic-AI 会拦截这个异常，自动消耗一次 retries 额度，并让模型重新发起调用
+                raise ModelRetry(f"由于网络通讯异常导致工具调用失败 ({e})。请重新尝试调用此工具。")
+
+            # 🌟 诊断 2：如果是代码逻辑/GBK编码等致命死错
+            else:
+                print(f"❌ [致命错误] {e}")
+                # 核心拦截：直接返回普通字符串作为结果
+                # 大模型看到这句话后，就知道工具废了，不会再执着重试，而是直接回复用户
+                return f"🚨 致命系统错误: {str(e)}。请立即放弃重试此工具，并直接向用户汇报系统故障！"
     return call_mcp_tool
 
 
@@ -186,8 +200,47 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
         get_llm_model(model_name),
         system_prompt=final_system_prompt,
         tools=[my_custom_tool],
-        output_type=Union[SensorRecord, str]  # 锁定输出结构
+        output_type=str,  # 锁定输出结构
+        retries=3  # 允许工具调用失败后最多重试 3 次，额度用完直接停止
     )
+
+
+# ==========================================
+# 🌟 进阶模块：安全截断历史记忆 (滑动窗口)
+# ==========================================
+def trim_history(history: list, max_messages: int = 6) -> list:
+    """
+    像外科手术一样精准截断历史记录。
+    不仅限制长度，还能避开“切断工具调用链”的致命雷区。
+    """
+    if len(history) <= max_messages:
+        return history
+
+    # 1. 粗略切取最后 max_messages 条
+    trimmed = history[-max_messages:]
+
+    # 2. 精密排雷：确保切下来的第一条消息是纯净的、由用户发起的问题
+    while trimmed:
+        first_msg = trimmed[0]
+        is_invalid_start = False
+
+        # 雷区 A：如果开头第一条是模型生成的回复（ModelResponse），逻辑断裂
+        if isinstance(first_msg, ModelResponse):
+            is_invalid_start = True
+
+        # 雷区 B：如果开头第一条包含了工具执行的返回结果（ToolReturnPart），说明大模型请求工具的那句话被切没了，逻辑断裂
+        elif isinstance(first_msg, ModelRequest):
+            if any(isinstance(part, ToolReturnPart) for part in first_msg.parts):
+                is_invalid_start = True
+
+        # 如果踩雷，就把这条残缺的记忆扔掉，往后找下一条，直到找到安全的起点
+        if is_invalid_start:
+            trimmed.pop(0)
+        else:
+            break
+
+    return trimmed
+
 
 # ==========================================
 # 模块四：用户交互界面
@@ -207,23 +260,28 @@ async def run_chat_loop(agent: Agent):
         if not user_input.strip():
             continue
 
-        print("🤖 思考中...")
+        # 🌟 每次提问前，先对历史记忆进行安全截断（保留最近 6 条有价值的信息）
+        history = trim_history(history, max_messages=6)
+
+        # print(f"🧹 (当前记忆长度: {len(history)} 条)")
+        print("🤖 思考中...\n回答: ", end="", flush=True)
 
         try:
-            resp = await agent.run(user_input, message_history=history)
-            history = list(resp.all_messages())
+            # 🌟 把 run() 换成 run_stream()，用 async with 打开“水龙头”
+            # 🌟 核心控制：传入 model_settings，限制 max_tokens
+            async with agent.run_stream(
+                    user_input,
+                    message_history=history,
+                    model_settings={'max_tokens': 800}  # 限制大模型最多生成 800 个 Token (防废话，防破产)
+            ) as resp:
 
-            print("\n回答:")
-            # 检查返回的数据有没有 model_dump 方法 (是不是 Pydantic 结构化对象)
-            if hasattr(resp.output, 'model_dump'):
-                data_dict = resp.output.model_dump()
-                for key, value in data_dict.items():
-                    # 打印结构化字段
-                    print(f"🔸 {key}: {value}")
-            else:
-                # 兜底：如果只是普通文本聊天，它没有 model_dump 方法，就会走到这里
-                # 此时 resp.data 就是一个纯字符串，直接打印即可！
-                print(resp.output)
+                async for text_chunk in resp.stream_text(delta=True):
+                    print(text_chunk, end="", flush=True)
+                print()  # 打印换行收尾
+
+                # 🌟 在水流完之后，更新聊天记录
+                history = resp.all_messages()
+
             print("-" * 50)
         except Exception as e:
             print(f"\n❌ 抱歉，大模型处理或工具调用时遇到错误：\n{e}")

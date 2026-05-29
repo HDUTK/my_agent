@@ -140,6 +140,40 @@ def query_csv(file_path: str, query_string: str) -> str:
                 f"请使用真实的列名重新查询: {cols}")
 
 
+# ==========================================
+# 🌟 新增数据提交工具
+# ==========================================
+def submit_sensor_record(
+        target_time: str,
+        air_temperature: float,
+        air_humidity: float,
+        wall_temperature: float,
+        has_risk: bool,
+        action_advice: str
+) -> str:
+    """
+    当用户要求提取石窟传感器数据并评估风险时，必须调用此工具提交最终的结构化诊断报告。
+
+    参数:
+    - target_time: 提取的目标时间字符串
+    - air_temperature: 空气温度值 (float)
+    - air_humidity: 空气湿度值 (float)
+    - wall_temperature: 壁面温度值 (float)
+    - has_risk: 是否有风险 (bool)
+    - action_advice: 系统就绪状态或针对风险给出的具体处置建议
+    """
+    print(f"\n[报告接收中心] 成功捕获到大模型提交的结构化数据：")
+    print(f"   - 时间: {target_time}")
+    print(f"   - 空气温湿度: {air_temperature} ℃ | {air_humidity} %")
+    print(f"   - 壁面温度: {wall_temperature} ℃")
+    print(f"   - 风险判定: {'有风险' if has_risk else '安全'}")
+    print(f"   - 处置建议: {action_advice}\n")
+
+    # 这里可以扩展业务逻辑，比如写入数据库、保存到本地 JSON 文件等
+    # 目前直接返回一个确认信息给大模型
+    return "成功：结构化诊断报告已安全提交至系统后台。"
+
+
 # 使用示例
 if __name__ == "__main__":
     folder = "./test"  # 替换为你的文件夹路径
