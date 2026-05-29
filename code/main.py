@@ -19,7 +19,7 @@ Target Python: 3.14
 import os
 import json
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from dotenv import load_dotenv
 
 from openai import AsyncOpenAI
@@ -134,11 +134,19 @@ def make_mcp_tool(session: ClientSession):
     """闭包工厂：接收一个 session，返回一个绑定好的工具调用网关"""
     async def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         print(f"\n[🔌 远程调用] 正在请求 Server 执行: {tool_name}")
+        print(f"   传入参数: {arguments}")
         try:
             result = await session.call_tool(tool_name, arguments)
             text_result = [content.text for content in result.content if content.type == "text"]
-            return "\n".join(text_result)
+            final_result = "\n".join(text_result)
+
+            # 2. 打印工具的返回结果（如果超过 300 字就截断显示，防止刷屏）
+            preview = final_result if len(final_result) < 300 else final_result[:300] + "\n... (内容太长，已省略后续输出)"
+            print(f"[📥 Server 返回]\n{preview}\n")
+
+            return final_result
         except Exception as e:
+            print(f"[❌ 调用失败] {e}")
             return f"工具调用失败: {str(e)}"
     return call_mcp_tool
 
@@ -178,7 +186,7 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
         get_llm_model(model_name),
         system_prompt=final_system_prompt,
         tools=[my_custom_tool],
-        output_type=SensorRecord  # 锁定输出结构
+        output_type=Union[SensorRecord, str]  # 锁定输出结构
     )
 
 # ==========================================

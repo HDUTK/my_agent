@@ -10,9 +10,14 @@ version: V1.0
 Target Python: 
 """
 
+import logging
 from mcp.server.fastmcp import FastMCP
 import inspect
 import tools
+
+# 🌟 屏蔽底层库的 INFO 级别刷屏日志，只放行 WARNING 和 ERROR
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("mcp").setLevel(logging.WARNING)
 
 
 # 1. 创建标准化 Server 实例

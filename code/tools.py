@@ -99,11 +99,9 @@ def rename_file(file_path: str, new_name: str) -> bool:
 def query_csv(file_path: str, query_string: str) -> str:
     """
     专门用于查询大型 CSV 文件的数据过滤工具。
-    大模型注意：请用 Pandas 的 query 语法编写 query_string。
-
-    参数:
-    - file_path: csv文件的相对或绝对路径 (例如 'test2/A63.csv')
-    - query_string: Pandas 过滤条件 (例如 "时间 == '2023/10/10 00:00'")
+    【大模型注意】
+    1. 必须用 Pandas 的 query 语法编写 query_string。
+    2. 请严格使用 CSV 的真实列名（通常是英文，如 time, air_temperature）。
     """
     print(f"[工具执行] 正在查询 CSV: {file_path} | 条件: {query_string}")
 
@@ -111,24 +109,35 @@ def query_csv(file_path: str, query_string: str) -> str:
         return f"❌ 错误: 找不到文件 {file_path}"
 
     try:
-        # 1. 明确参数名 filepath_or_buffer，消除第一个绿线
-        df = pd.read_csv(file_path)
+        # 1. 读取 CSV (消除警告)
+        df = pd.read_csv(filepath_or_buffer=file_path)
 
-        # 2. 类型收窄：明确告诉 PyCharm 这绝对是个 DataFrame，消除第二个绿线
         if not isinstance(df, pd.DataFrame):
             return "❌ 错误: 读取的结果不是有效的 DataFrame"
 
+        # 2. 执行大模型写好的查询语句
         result_df = df.query(query_string)
 
+        # 🌟 核心升级 1：查不到数据时的“格式纠偏”
         if result_df.empty:
-            return f"⚠️ 查询成功，但在文件 {file_path} 中没有找到符合 '{query_string}' 的数据。"
+            cols = df.columns.tolist()
+            sample_data = df.iloc[0].to_dict() if not df.empty else "无数据"
+            return (f"⚠️ 查询执行成功，但结果为空！\n"
+                    f"这通常是因为你的 query_string (特别是时间格式) 与 CSV 的实际文本不匹配。\n"
+                    f"请看一眼 CSV 真实的列名和第一条数据的格式，然后修改你的条件重试！\n"
+                    f"-> 真实列名: {cols}\n"
+                    f"-> 真实数据示例: {sample_data}")
 
-        # 3. 明确强转为 str
+        # 3. 正常返回 JSON 字符串
         json_result = str(result_df.to_json(orient="records", force_ascii=False))
         return json_result
 
     except Exception as e:
-        return f"❌ 查询失败，可能是 query_string 语法错误或列名不存在。Python报错: {str(e)}"
+        # 🌟 核心升级 2：语法报错时的“列名纠偏”
+        cols = df.columns.tolist() if 'df' in locals() else "未知"
+        return (f"❌ 查询语法报错！错误信息: {str(e)}\n"
+                f"这通常是因为你使用了不存在的列名（比如用了中文'时间'，但实际是'time'）。\n"
+                f"请使用真实的列名重新查询: {cols}")
 
 
 # 使用示例
