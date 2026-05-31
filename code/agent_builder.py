@@ -70,39 +70,18 @@ def make_mcp_tool(session: ClientSession):
 
 
 # ==========================================
-# Agent 装配流水线
+# 🌟 面向对象的万能引擎工具类
 # ==========================================
-async def build_agent_with_mcp(session: ClientSession, model_name:str,
-                               scenario_name: str = "default_chat") -> Agent[Any, str]:
+class UniversalEngineTool:
     """
-    Agent 装配厂：负责找 Server 要工具列表，写说明书，最后把大脑和工具组装成 Agent
+    将重度任务引擎封装为类，实现配置与逻辑的解耦。
     """
-    # 1. 获取工具列表
-    tools_response = await session.list_tools()
-    mcp_tools = tools_response.tools
-    print(f"📦 发现 {len(mcp_tools)} 个远程工具: {[t.name for t in mcp_tools]}")
+    def __init__(self, model_name: str):
+        # 初始化时将系统级的参数（模型名称）冻结在实例内部
+        self.model_name = model_name
 
-    # 2. 编写工具说明书 (系统提示词)
-    tools_instruction = "你现在连接到了一个本地工具库，可以使用以下工具：\n\n"
-    for tool in mcp_tools:
-        tools_instruction += f"- 名称: {tool.name}\n"
-        tools_instruction += f"  描述: {tool.description}\n"
-        tools_instruction += f"  参数格式: {json.dumps(tool.inputSchema, ensure_ascii=False)}\n\n"
-    tools_instruction += "请调用 `call_mcp_tool` 函数来使用上述工具。"
-
-    # 🌟 进阶模块：系统提示词 (System Prompt) 策略
-    advanced_prompt = load_prompt(scenario_name)
-
-    # 将人设模板与动态工具列表拼接，形成最终的超级大脑设定
-    final_system_prompt = advanced_prompt + tools_instruction
-
-    # 3. 生产对讲机
-    my_custom_tool = make_mcp_tool(session)
-
-    # ==========================================
-    # 🌟 万能重度任务引擎桥接工具
-    # ==========================================
-    async def trigger_universal_engine(
+    async def run_engine(
+            self,
             goal: str,
             source_files: list[str] = None,
             save_to: str = "output_result.json",
@@ -141,7 +120,7 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
                     print(f"⚠️ 文件 {fpath} 不存在，已跳过。")
 
         # 2. 启动外包流水线引擎 (复用 main.py 里的模型配置)
-        engine_model = get_llm_model(model_name)
+        engine_model = get_llm_model(self.model_name)
         engine = UniversalPlanExecuteEngine(model_instance=engine_model)
 
         # 3. 阻塞等待流水线跑完
@@ -158,8 +137,40 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
 
         return f"🎉 复杂流水线已在后台成功执行！共完成 {len(results)} 个步骤，详细结果已持久化到 {save_to}。请向用户汇报成功摘要。"
 
-    # 将其包装为 Tool
-    heavy_engine_tool = Tool(trigger_universal_engine)
+
+# ==========================================
+# Agent 装配流水线
+# ==========================================
+async def build_agent_with_mcp(session: ClientSession, model_name:str,
+                               scenario_name: str = "default_chat") -> Agent[Any, str]:
+    """
+    Agent 装配厂：负责找 Server 要工具列表，写说明书，最后把大脑和工具组装成 Agent
+    """
+    # 1. 获取工具列表
+    tools_response = await session.list_tools()
+    mcp_tools = tools_response.tools
+    print(f"📦 发现 {len(mcp_tools)} 个远程工具: {[t.name for t in mcp_tools]}")
+
+    # 2. 编写工具说明书 (系统提示词)
+    tools_instruction = "你现在连接到了一个本地工具库，可以使用以下工具：\n\n"
+    for tool in mcp_tools:
+        tools_instruction += f"- 名称: {tool.name}\n"
+        tools_instruction += f"  描述: {tool.description}\n"
+        tools_instruction += f"  参数格式: {json.dumps(tool.inputSchema, ensure_ascii=False)}\n\n"
+    tools_instruction += "请调用 `call_mcp_tool` 函数来使用上述工具。"
+
+    # 🌟 系统提示词 (System Prompt) 策略
+    advanced_prompt = load_prompt(scenario_name)
+
+    # 将人设模板与动态工具列表拼接，形成最终的超级大脑设定
+    final_system_prompt = advanced_prompt + tools_instruction
+
+    # 3. 生产对讲机
+    my_custom_tool = make_mcp_tool(session)
+
+    # 实例化 OOP 版本的万能引擎，并将其方法提取为 Tool
+    engine_instance = UniversalEngineTool(model_name)
+    heavy_engine_tool = Tool(engine_instance.run_engine)
 
     # 4. 组装并返回 Agent
     return Agent(

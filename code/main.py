@@ -93,10 +93,10 @@ async def run_chat_loop(agent: Agent):
 # Gemini/GPT/Qwen/Zhipu/Hunyuan（超时）/Spark（没有key）
 # default_chat/a63_sensor/code_review/paper_review
 # ==========================================
-async def main(model_name: str = "Qwen", scenario_name: str = "paper_review"):
+async def main(model_name: str = "Qwen", scenario_name: str = "default_chat"):
     print(f"🔄 系统启动中... [当前指定模型: {model_name}]")
 
-    # 第一步：定义后厨位置
+    # 第一步：定义后厨位置——启动连接（对接 MCP Server）
     server_parameters = StdioServerParameters(command="python", args=["mcp_server.py"])
 
     # 第二步：接通管道并建立会话
