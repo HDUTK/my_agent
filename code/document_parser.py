@@ -11,25 +11,89 @@ Target Python:  3.14 -> 3.12
 """
 
 import os
+
+# # 强行接管底层的下载通道，指向国内镜像源！
+# os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+#
+# # 强行关掉所有代理，防止 Clash/V2ray 端口拦截
+# os.environ['HTTP_PROXY'] = ""
+# os.environ['HTTPS_PROXY'] = ""
+
 import pandas as pd
 import docx
 import fitz  # PyMuPDF
 import json
+import subprocess
+import shutil
 
 
 def parse_pdf(file_path: str) -> str:
-    """解析 PDF 文件，提取所有页面的文本"""
-    text_content = []
+    """
+    🌟 进程隔离版：使用 Marker-pdf 进行轻量级但高精度的 PDF 深度解析
+    优点：提取精准，过滤页眉页脚，保留图表结构，且解析进程用完即毁，绝不占用主进程内存！
+    """
     try:
-        # 打开 PDF 文件
-        with fitz.open(file_path) as pdf_document:
-            for page_num in range(len(pdf_document)):
-                page = pdf_document.load_page(page_num)
-                # 提取每一页的纯文本
-                text_content.append(page.get_text("text"))
-        return "\n".join(text_content)
+        # 1. 准备输入和输出路径
+        abs_file_path = os.path.abspath(file_path)
+        base_name = os.path.splitext(os.path.basename(abs_file_path))[0]
+        # 在源 PDF 同级目录下生成一个 _marker_out 的文件夹
+        output_dir = os.path.join(os.path.dirname(abs_file_path), f"{base_name}_marker_out")
+
+        # 如果之前解析过，先清理旧文件夹，防止数据污染
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        print(
+            f"\n👁️ [视觉解析启动] 正在后台启动 Marker 分析文档: {base_name}.pdf ... (若是首次运行将自动下载模型权重，请耐心等待)")
+
+        # 2. 构建最新版 1.x 的极简命令行指令
+        # 去掉了已经废弃的 --langs 和 --batch_multiplier
+        # 强制使用 --output_dir 来指定输出目录
+        command = [
+            "marker_single",
+            abs_file_path,
+            "--output_dir", output_dir
+        ]
+
+        # 3. 执行子进程并阻塞等待 (超时设为 15 分钟)
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            timeout=900
+        )
+
+        if result.returncode != 0:
+            return f"[Marker解析失败]: 子进程报错\n{result.stderr}"
+
+        # 4. 🌟 兼容新版的超强容错寻找法：去输出目录里遍历寻找那份黄金 Markdown 文件
+        expected_md_file = None
+        for root, dirs, files in os.walk(output_dir):
+            for file in files:
+                if file.endswith(".md"):
+                    expected_md_file = os.path.join(root, file)
+                    break
+            if expected_md_file:
+                break
+
+        if not expected_md_file or not os.path.exists(expected_md_file):
+            return f"[Marker解析异常]: 未能在预期路径找到输出的 Markdown 文件\n调试信息:\n{result.stdout}"
+
+        with open(expected_md_file, "r", encoding="utf-8") as f:
+            md_content = f.read()
+
+        print(f"✅ [解析成功] 获得纯净 Markdown，文本长度: {len(md_content)} 字符")
+        return md_content
+
+    except subprocess.TimeoutExpired:
+        return f"[Marker解析超时]: 解析文件 {file_path} 花费了太长时间。"
+    except FileNotFoundError:
+        return "⚠️ 未找到 marker_single 命令。请确认环境激活，或检查 pip install marker-pdf 是否成功。"
     except Exception as e:
-        return f"[PDF解析错误]: {str(e)}"
+        return f"[视觉PDF解析错误]: {str(e)}"
 
 
 def parse_docx(file_path: str) -> str:
@@ -160,6 +224,6 @@ def read_any_file(file_path: str) -> str:
 # 测试代码 (当直接运行此文件时执行)
 if __name__ == "__main__":
     # 可以随便丢一个 pdf 或 xlsx 进去测试一下提取效果
-    print(read_any_file("test2/parser_test/default_chat.md"))
+    print(read_any_file("test2/parser_test/d.txt"))
     pass
 
