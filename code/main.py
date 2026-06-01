@@ -14,7 +14,7 @@ contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
 time: 2026/05/12 15:47
 version: V1.0
-Target Python: 3.14
+Target Python: 3.14 -> 3.12
 """
 
 

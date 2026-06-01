@@ -7,7 +7,7 @@ contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
 time: 2026/05/31 16:40
 version: V1.0
-Target Python: 
+Target Python:  3.14 -> 3.12
 """
 
 import os
@@ -22,6 +22,7 @@ from mcp.client.session import ClientSession
 from agent_engine import UniversalPlanExecuteEngine
 from llm_factory import get_llm_model
 from utils import load_prompt
+from document_parser import read_any_file
 
 
 # ==========================================
@@ -105,19 +106,8 @@ class UniversalEngineTool:
         context_text = ""
         if source_files:
             for fpath in source_files:
-                if os.path.exists(fpath):
-                    try:
-                        if fpath.endswith(".docx"):
-                            doc = docx.Document(fpath)
-                            text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-                            context_text += f"\n--- 文件 [{fpath}] 内容 ---\n{text}\n"
-                        else:
-                            with open(fpath, "r", encoding="utf-8") as f:
-                                context_text += f"\n--- 文件 [{fpath}] 内容 ---\n{f.read()}\n"
-                    except Exception as e:
-                        print(f"⚠️ 读取文件 {fpath} 失败: {e}")
-                else:
-                    print(f"⚠️ 文件 {fpath} 不存在，已跳过。")
+                file_content = read_any_file(fpath)
+                context_text += f"\n--- 文件 [{fpath}] 内容 ---\n{file_content}\n"
 
         # 2. 启动外包流水线引擎 (复用 main.py 里的模型配置)
         engine_model = get_llm_model(self.model_name)

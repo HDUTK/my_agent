@@ -7,7 +7,7 @@ contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
 time: 2026/05/31 16:40
 version: V1.0
-Target Python: 
+Target Python:  3.14 -> 3.12
 """
 
 import os
