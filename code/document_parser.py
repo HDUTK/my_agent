@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-function description: 此文件用于文档解析统一工厂（支持 txt, md, pdf, docx, csv, xlsx, xls）
+function description: 此文件用于RAG 第一阶段：文档解析统一工厂（支持 txt, md, pdf, docx, csv, xlsx, xls）
 author: TangKan
 contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
@@ -12,12 +12,27 @@ Target Python:  3.14 -> 3.12
 
 import os
 
-# # 强行接管底层的下载通道，指向国内镜像源！
+# 🌟 强制控制台和子进程使用 UTF-8 编码
+os.environ["PYTHONIOENCODING"] = "utf-8"
+# 🌟 管住所有 Python 派生的子进程（强制无视 Windows 设定，使用 UTF-8）
+os.environ["PYTHONUTF8"] = "1"
+
+# 下载模型全都存到 D 盘这个文件夹
+os.environ["HF_HOME"] = "D:/Python31210/HuggingFace_Models"
+
+# 强行关掉所有代理，防止 Clash/V2ray 端口拦截
+os.environ['HTTP_PROXY'] = ""
+os.environ['HTTPS_PROXY'] = ""
+
+# 强行接管底层的下载通道，指向国内镜像源！
+# 【已注释】因为全离线了，不需要配镜像源去查网络了
+# (需要检查更新模型时打开，同时注释掉之后下面两行代码)
 # os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-#
-# # 强行关掉所有代理，防止 Clash/V2ray 端口拦截
-# os.environ['HTTP_PROXY'] = ""
-# os.environ['HTTPS_PROXY'] = ""
+# 开启终极离线模式：严禁偷偷连网检查更新，纯本地物理读取！
+# （注意：因为 marker_single 是子进程，它会自动继承这两个离线环境变量）
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 
 import pandas as pd
 import docx
@@ -25,6 +40,18 @@ import fitz  # PyMuPDF
 import json
 import subprocess
 import shutil
+
+
+def smart_decode(data: bytes) -> str:
+    """尽量稳地解码子进程输出"""
+    if not data:
+        return ""
+    for enc in ("utf-8-sig", "utf-8", "gbk", "cp936"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def parse_pdf(file_path: str) -> str:
@@ -61,10 +88,13 @@ def parse_pdf(file_path: str) -> str:
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=False,
             encoding="utf-8",
             timeout=900
         )
+
+        # stdout_text = smart_decode(result.stdout)
+        # stderr_text = smart_decode(result.stderr)
 
         if result.returncode != 0:
             return f"[Marker解析失败]: 子进程报错\n{result.stderr}"
@@ -132,7 +162,7 @@ def parse_spreadsheet(file_path: str, ext: str) -> str:
             return df.to_markdown(index=False)
 
         else:  # .xlsx 或 .xls
-            # 🌟 核心修改：sheet_name=None 会一次性读取所有 Sheet
+            # 🌟 sheet_name=None 会一次性读取所有 Sheet
             # 返回的数据结构是: {'Sheet1': df1, 'Sheet2': df2}
             sheet_dict = pd.read_excel(file_path, sheet_name=None)  # type: ignore
 
@@ -224,6 +254,6 @@ def read_any_file(file_path: str) -> str:
 # 测试代码 (当直接运行此文件时执行)
 if __name__ == "__main__":
     # 可以随便丢一个 pdf 或 xlsx 进去测试一下提取效果
-    print(read_any_file("test2/parser_test/d.txt"))
+    print(read_any_file("test2/parser_test/博士在读成绩单.pdf"))
     pass
 
