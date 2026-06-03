@@ -14,8 +14,10 @@ Target Python: 3.12
 
 import os
 import warnings
+import hashlib
 
-# 🌟 给 Flash Attention 警告贴上封条！
+
+# 🌟 消除 Flash Attention 警告
 warnings.filterwarnings("ignore", message=".*1Torch was not compiled with flash attention.*")
 
 # 🌟 强制终端使用 UTF-8 编码
@@ -49,8 +51,25 @@ from langchain_core.documents import Document
 # 🌟 指定的数据库存放位置！
 # 建议在项目里建一个专门的文件夹，比如 db_storage
 # ==========================================
-DB_PERSIST_PATH = r"D:\PythonProject\AI_Agent\db_storage\chroma_db"
+DB_PERSIST_PATH = r"E:\Vector_Database_for_Agent\db_storage\chroma_db"
 COLLECTION_NAME = "tk_knowledge"  # 集合的名字（相当于关系型数据库的表名）
+
+
+def generate_chunk_id(chunk: Document) -> str:
+    """
+    🌟 利用 MD5 算法为每个纸条生成独一无二的“数字指纹”。
+    只要文件的来源 (source) 和 文本内容 (page_content) 不变，生成的 ID 就绝对不变！
+    """
+    # 提取来源文件名，如果没有就用 unknown
+    source = chunk.metadata.get('source', 'unknown')
+    # 提取这段纸条的具体文字内容
+    content = chunk.page_content
+
+    # 将来源和内容拼接成一个超级字符串
+    unique_string = f"{source}::{content}"
+
+    # 计算 MD5 哈希值并返回 32 位字符串
+    return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
 
 
 def get_bge_embeddings():
@@ -60,7 +79,7 @@ def get_bge_embeddings():
     """
     print("⏳ 正在加载 BGE-M3 顶级向量模型引擎...")
 
-    # 🌟 核心修改点：将模型名称直接改为 bge-m3
+    # 🌟 模型名称 bge-m3
     model_name = "BAAI/bge-m3"
 
     # device: 如果电脑有英伟达显卡，强烈建议改为 'cuda' 会有百倍加速
@@ -90,6 +109,10 @@ def save_chunks_to_chroma(chunks: list[Document]):
     print(f"📦 准备将 {len(chunks)} 个 Chunk 进行向量化并存入 ChromaDB...")
     print(f"📁 目标存储路径: {DB_PERSIST_PATH}")
 
+    # 🌟 批量为所有纸条生成固定的数字指纹 ID
+    chunk_ids = [generate_chunk_id(chunk) for chunk in chunks]
+    print(f"🔑 已生成固定唯一哈希 ID，启动防重复入库 (Upsert 机制)...")
+
     # 1. 唤醒模型
     embeddings = get_bge_embeddings()
 
@@ -100,6 +123,7 @@ def save_chunks_to_chroma(chunks: list[Document]):
     vector_db = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
+        ids=chunk_ids,
         persist_directory=DB_PERSIST_PATH,
         collection_name=COLLECTION_NAME
     )
@@ -130,12 +154,11 @@ def query_chroma_db(query_text: str, top_k: int = 3):
     return results
 
 
-# 将这段加在 vector_builder.py 最底部
 if __name__ == "__main__":
     from document_parser import read_any_file
     from chunk import intelligent_chunker
 
-    # 🎯 找一个你本地真实的测试文件（挑一个内容丰富的，比如 JSON 或 Excel）
+    # 🎯 找一个本地真实的测试文件（挑一个内容丰富的，比如 JSON 或 Excel）
     test_file_path = r"D:\PythonProject\AI_Agent\code\test2\parser_test\Manuscript.docx"
 
     print("\n" + "=" * 60)
@@ -147,12 +170,11 @@ if __name__ == "__main__":
     # 2. 切分
     chunks = intelligent_chunker(raw_text, os.path.basename(test_file_path))
 
-    # 3. 入库 (核心测试点！)
+    # 3. 入库
     if chunks:
         save_chunks_to_chroma(chunks)
 
         # 4. 立刻测试一下检索！
-        # 假设传入的是石窟报告，这里可以搜 "9号窟的湿度"
         # 随便搜个测试问题
         search_results = query_chroma_db("论文的结论是什么？", top_k=2)
 
