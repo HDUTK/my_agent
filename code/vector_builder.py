@@ -135,6 +135,7 @@ def save_chunks_to_chroma(chunks: list[Document]):
 def query_chroma_db(query_text: str, top_k: int = 3):
     """
     测试检索功能：输入问题，寻找最相似的纸条
+    ⭐️ 单元测试时使用
     """
     print(f"\n🔍 正在检索问题: '{query_text}'")
 
