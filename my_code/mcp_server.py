@@ -13,9 +13,9 @@ Target Python:  3.14 -> 3.12
 import logging
 from mcp.server.fastmcp import FastMCP
 import inspect
-from code.core_tools import tools
+from core_tools import tools
 
-from code.Executor.RAG.local_RAG import LocalKnowledgeExpert
+from RAG.local_RAG import LocalKnowledgeExpert
 
 
 # 🌟 屏蔽底层库的 INFO 级别刷屏日志，只放行 WARNING 和 ERROR

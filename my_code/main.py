@@ -29,8 +29,8 @@ from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
 # 导入其他的模块
-from code.utils.utils import trim_history
-from code.agent.agent_builder import build_agent_with_mcp
+from utils.utils import trim_history
+from agent.agent_builder import build_agent_with_mcp
 
 
 # 加载所有环境变量配置
