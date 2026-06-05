@@ -4,6 +4,7 @@
 function description: 此文件用于agent调度中心。只负责启动网络连接、调用装配车间，以及执行对话循环。
 以下是示例输入：
 你好
+请查看我本地test2文件夹内的Manuscript.docx，然后大概总结一下这篇论文内容
 帮我把 test2 文件夹下的 Manuscript.docx 里面的 Abstract, Introduction, Research aim, Methodology, Results, Discussion, Conclusion 这 7 个部分进行总结提取
 当前目录下有一个文件夹叫test2，里面有一个文件是A63.csv，记录了A63传感器从2023/06/07/00:00到2024/04/06/23:55的空气温度、空气湿度、壁面温度，我想要将里面的2023/10/10/00:00的空气温度、空气湿度、壁面温度提取出来并告诉我环境是否有风险（空气温度超过 20度 或空气湿度超过 60%，判定又风险）
 列出test文件夹下所有的文件名，然后告诉我每一个文件用的什么语言编写的代码
@@ -28,8 +29,8 @@ from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
 # 导入其他的模块
-from utils import trim_history
-from agent_builder import build_agent_with_mcp
+from code.utils.utils import trim_history
+from code.agent.agent_builder import build_agent_with_mcp
 
 
 # 加载所有环境变量配置
@@ -93,7 +94,7 @@ async def run_chat_loop(agent: Agent):
 # Gemini/GPT/Qwen/Zhipu/Hunyuan（超时）/Spark（没有key）
 # default_chat/a63_sensor/code_review/paper_review
 # ==========================================
-async def main(model_name: str = "Qwen", scenario_name: str = "default_chat"):
+async def main(model_name: str = "Qwen", scenario_name: str = "paper_review"):
     print(f"🔄 系统启动中... [当前指定模型: {model_name}]")
 
     # 第一步：定义后厨位置——启动连接（对接 MCP Server）
