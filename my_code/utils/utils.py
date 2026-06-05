@@ -10,7 +10,14 @@ version: V1.0
 Target Python:  3.14 -> 3.12
 """
 
+import os
+import warnings
+
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart
+from config.system_config import PROMPTS_DIR
+
+from config.system_config import HF_MODELS_PATH
+from config.agent_config import MODEL_REGISTRY
 
 
 # ==========================================
@@ -18,7 +25,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart
 # ==========================================
 def load_prompt(scenario_name: str) -> str:
     """根据场景名称，从本地文件中读取 Prompt"""
-    file_path = f"AdvancedPrompts/{scenario_name}.md"
+    file_path = PROMPTS_DIR + f"/{scenario_name}.md"
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
@@ -62,3 +69,53 @@ def trim_history(history: list, max_messages: int = 6) -> list:
 
     return trimmed
 
+
+# ==========================================
+# 动态环境变注入函数
+# ==========================================
+def apply_model_environment(model_key: str):
+    """
+    根据传入的模型 key (如 'bge_m3')，动态注入对应的 HuggingFace 环境变量。
+    必须在对应的 RAG 组件 import 底层大模型库之前调用！
+    """
+    # 🌟 强制终端使用 UTF-8 编码
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    # 🌟 消除 Flash Attention 警告(rag_retriever.py和vector_builder.py)
+    # warnings.filterwarnings("ignore", message=".*1Torch was not compiled with flash attention.*")
+    # 消除警告
+    warnings.filterwarnings("ignore")
+
+    config = MODEL_REGISTRY.get(model_key)
+    if not config:
+        raise ValueError(f" 未在 MODEL_REGISTRY 中找到模型配置: {model_key}")
+
+    # 配置当前模型专属的本地缓存路径
+    os.environ["HF_HOME"] = config["local_path"]
+
+    # 基础安全清理：强行拔掉 Python 的代理管子，防止网络卡死
+    os.environ['HTTP_PROXY'] = ""
+    os.environ['HTTPS_PROXY'] = ""
+    # 🌟 彻底关闭 ChromaDB 的后台匿名数据收集线程（防止卡死）
+    os.environ["ANONYMIZED_TELEMETRY"] = "False"
+    # 🌟 关闭 Tokenizer 导致的多线程死锁
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    if config["offline"]:
+        # 开启终极离线模式
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        # 离线时清除镜像源设置
+        if "HF_ENDPOINT" in os.environ:
+            del os.environ["HF_ENDPOINT"]
+    else:
+        # 允许联网模式
+        os.environ["HF_HUB_OFFLINE"] = "0"
+        os.environ["TRANSFORMERS_OFFLINE"] = "0"
+        if config["use_mirror"]:
+            os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+        else:
+            if "HF_ENDPOINT" in os.environ:
+                del os.environ["HF_ENDPOINT"]
+
+    print(
+        f"⚙ [环境配置] 已成功为模型 [{model_key}] 注入网络与路径环境变（离线={config['offline']}, 镜像={config['use_mirror']})")

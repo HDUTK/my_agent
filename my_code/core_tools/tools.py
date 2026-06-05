@@ -240,7 +240,7 @@ def submit_paper_section(section_name: str, content: str) -> str:
             json.dump(summary_data, f, ensure_ascii=False, indent=4)
 
         print(f"已安全接收并持久化章节: {section_name}")
-        return f"✅ {section_name} 章节已保存。请继续调用此工具提交下一个章节，直到 7 个章节全部提交完毕！"
+        return f" {section_name} 章节已保存。请继续调用此工具提交下一个章节，直到 7 个章节全部提交完毕！"
     except Exception as e:
         return f"写入 {section_name} 时发生本地错误: {str(e)}"
 
@@ -266,7 +266,7 @@ def update_task_notes(current_action: str, checklist_status: str, next_step: str
 
 # 使用示例
 if __name__ == "__main__":
-    folder = "./test"  # 替换为你的文件夹路径
+    folder = "./test/1"  # 替换为你的文件夹路径
     names = get_file_names(folder)
     # rename_file("C:/temp/old.txt", "new.txt")
     print(names)

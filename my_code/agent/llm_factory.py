@@ -10,6 +10,8 @@ version: V1.0
 Target Python:  3.14 -> 3.12
 """
 
+from config.agent_config import LLM_CONFIG
+
 import os
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -25,9 +27,7 @@ def get_llm_model(platform: str):
     # 1. Google Gemini
     # ----------------------------------------
     if platform == "gemini":
-        # gemini-2.0-flash/gemini-2.5-flash/gemini-2.5-pro/gemini-3-flash-preview/
-        # gemini-3-pro-preview/gemini-3.1-pro-preview/gemini-3.5-flash
-        return GoogleModel("gemini-2.5-flash")
+        return GoogleModel(LLM_CONFIG["gemini"]["type"])
 
     # ----------------------------------------
     # 2. OpenAI (ChatGPT)
@@ -37,7 +37,7 @@ def get_llm_model(platform: str):
         if not api_key: raise ValueError("❌ 找不到 OPENAI_API_KEY")
 
         os.environ["OPENAI_API_KEY"] = api_key
-        return OpenAIChatModel("gpt-4o-mini")
+        return OpenAIChatModel(LLM_CONFIG["gpt"]["type"])
 
     # ----------------------------------------
     # 3. 阿里 - 通义千问 (Qwen)
@@ -51,7 +51,7 @@ def get_llm_model(platform: str):
         os.environ["OPENAI_BASE_URL"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
         # 现在只需要传一个纯净的名字，括号里什么都不用加！
-        return OpenAIChatModel("qwen-plus")
+        return OpenAIChatModel(LLM_CONFIG["qwen"]["type"])
 
     # ----------------------------------------
     # 4. 智谱 - GLM
@@ -62,7 +62,7 @@ def get_llm_model(platform: str):
 
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_BASE_URL"] = "https://open.bigmodel.cn/api/paas/v4/"
-        return OpenAIChatModel("glm-4-flash")
+        return OpenAIChatModel(LLM_CONFIG["zhipu"]["type"])
 
     # ----------------------------------------
     # 5. 腾讯 - 混元 (Hunyuan)
@@ -73,7 +73,7 @@ def get_llm_model(platform: str):
 
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_BASE_URL"] = "https://api.hunyuan.cloud.tencent.com/v1"
-        return OpenAIChatModel("hunyuan-lite")
+        return OpenAIChatModel(LLM_CONFIG["hunyuan"]["type"])
 
     # ----------------------------------------
     # 6. 讯飞 - 星火 (Spark)
@@ -84,7 +84,7 @@ def get_llm_model(platform: str):
 
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_BASE_URL"] = "https://spark-api-open.xf-yun.com/v1"
-        return OpenAIChatModel("4.0Ultra")
+        return OpenAIChatModel(LLM_CONFIG["spark"]["type"])
 
     # 如果输入的平台名字不在这 6 个里面，抛出异常
 

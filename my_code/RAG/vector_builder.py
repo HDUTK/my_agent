@@ -13,46 +13,18 @@ Target Python: 3.12
 """
 
 import os
-import warnings
 import hashlib
 
+from config.system_config import HF_MODELS_PATH, DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
+from config.agent_config import MODEL_REGISTRY
+from utils.utils import apply_model_environment
 
-# 🌟 消除 Flash Attention 警告
-warnings.filterwarnings("ignore", message=".*1Torch was not compiled with flash attention.*")
-
-# 🌟 强制终端使用 UTF-8 编码
-os.environ["PYTHONIOENCODING"] = "utf-8"
-
-# 🌟 指定大模型位置
-os.environ["HF_HOME"] = "D:/Python31210/HuggingFace_Models"
-
-# 🌟 强行拔掉 Python 的代理管子，防止关闭 VPN 后端口卡死
-os.environ['HTTP_PROXY'] = ""
-os.environ['HTTPS_PROXY'] = ""
-
-# 🌟 彻底关闭 ChromaDB 的后台匿名数据收集线程（防止卡死）
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-# 🌟 关闭 Tokenizer 导致的多线程死锁
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-# 🌟 强行接管下载通道，指向国内 HF 镜像源，防止 BGE 模型下载卡死！
-# (需要检查更新模型时打开，同时注释掉之后下面两行代码)
-# os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-# 🌟 开启终极离线模式：严禁程序偷偷连网检查更新，纯本地物理读取！
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-
+# 读取bge_m3模型的配置
+apply_model_environment("bge_m3")
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-
-# ==========================================
-# 🌟 指定的数据库存放位置！
-# 建议在项目里建一个专门的文件夹，比如 db_storage
-# ==========================================
-DB_PERSIST_PATH = r"E:\Vector_Database_for_Agent\db_storage\chroma_db"
-COLLECTION_NAME = "tk_knowledge"  # 集合的名字（相当于关系型数据库的表名）
 
 
 def generate_chunk_id(chunk: Document) -> str:
@@ -77,14 +49,13 @@ def get_bge_embeddings():
     🌟 加载智源最新一代 BGE-M3 多语言/长文本向量模型 (纯本地运行)
     首次运行会自动去镜像源下载约 2.2GB 的模型权重，之后永久本地秒加载。
     """
-    print("⏳ 正在加载 BGE-M3 顶级向量模型引擎...")
+    print(" 正在加载 BGE-M3 顶级向量模型引擎...")
 
     # 🌟 模型名称 bge-m3
-    model_name = "BAAI/bge-m3"
+    model_name = MODEL_REGISTRY['bge_m3']['model_name']
 
-    # device: 如果电脑有英伟达显卡，强烈建议改为 'cuda' 会有百倍加速
-    # 如果没有显卡或用的是轻薄本，保持 'cpu' 即可
-    model_kwargs = {'device': 'cuda'}
+    # device
+    model_kwargs = {'device': DEVICE}
 
     # normalize_embeddings=True 依然极其重要！确保余弦相似度的准确计算
     encode_kwargs = {'normalize_embeddings': True}
@@ -94,7 +65,7 @@ def get_bge_embeddings():
         model_kwargs=model_kwargs,
         encode_kwargs=encode_kwargs
     )
-    print("✅ BGE-M3 模型加载完毕！")
+    print(" BGE-M3 模型加载完毕！")
     return embeddings
 
 
@@ -156,11 +127,11 @@ def query_chroma_db(query_text: str, top_k: int = 3):
 
 
 if __name__ == "__main__":
-    from code.Executor.RAG.document_parser import read_any_file
-    from code.Executor.RAG.chunk import intelligent_chunker
+    from RAG.document_parser import read_any_file
+    from RAG.chunk import intelligent_chunker
 
     # 🎯 找一个本地真实的测试文件（挑一个内容丰富的，比如 JSON 或 Excel）
-    test_file_path = r"/code/test2/parser_test/Manuscript.docx"
+    test_file_path = r"D:/PythonProject/AI_Agent/my_code/test/2/Manuscript.docx"
 
     print("\n" + "=" * 60)
     print("🚀 RAG 全链路启动：解析 -> 切分 -> 向量入库")

@@ -13,6 +13,8 @@ Target Python: 3.12
 
 
 import os
+
+from config.agent_config import CHUNK_CONFIG
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
@@ -35,9 +37,9 @@ def chunk_markdown_or_text(text: str, source_file: str) -> list[Document]:
 
     # 2. 递归字符保底切分 (防止某个标题下的内容依然超长)
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=600,  # 每张纸条最大 600 字
-        chunk_overlap=100,  # 重叠 100 字，防止上下文（如石窟监测数据）断裂
-        separators=["\n\n", "\n", "。", "！", "？", "，", " ", ""]
+        chunk_size=CHUNK_CONFIG["markdown_or_text"]["CHUNK_SIZE"],  # 每张纸条最大字数
+        chunk_overlap=CHUNK_CONFIG["markdown_or_text"]["CHUNK_OVERLAP"],  # 重叠字数，防止上下文断裂
+        separators=CHUNK_CONFIG["markdown_or_text"]["SEPARATOR"]
     )
 
     chunks = text_splitter.split_documents(md_splits)
@@ -68,9 +70,9 @@ def chunk_spreadsheet(text: str, source_file: str) -> list[Document]:
 
     # 2. 对每个 Sheet 里面的数据按行进行保底切分
     table_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,  # 表格数据密度大，大概包含 3-5 行数据
-        chunk_overlap=50,
-        separators=["\n\n", "\n"]  # 严禁按句号逗号切表格，保持表格行的完整
+        chunk_size=CHUNK_CONFIG["spreadsheet"]["CHUNK_SIZE"],  # 表格数据密度大，大概包含 3-5 行数据
+        chunk_overlap=CHUNK_CONFIG["spreadsheet"]["CHUNK_OVERLAP"],
+        separators=CHUNK_CONFIG["spreadsheet"]["SEPARATOR"]  # 严禁按句号逗号切表格，保持表格行的完整
     )
 
     # 将包含 Sheet Metadata 的块传给递归切分器
@@ -91,9 +93,9 @@ def chunk_json(text: str, source_file: str) -> list[Document]:
     策略：严格按照 JSON 括号层级进行递归切分
     """
     json_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", "},", "],", "}", "]"]  # 针对 JSON 结构的特殊分割符
+        chunk_size=CHUNK_CONFIG["json"]["CHUNK_SIZE"],
+        chunk_overlap=CHUNK_CONFIG["json"]["CHUNK_OVERLAP"],
+        separators=CHUNK_CONFIG["json"]["SEPARATOR"]  # 针对 JSON 结构的特殊分割符
     )
 
     raw_doc = [Document(page_content=text)]
@@ -118,7 +120,7 @@ def intelligent_chunker(text_content: str, file_path: str) -> list[Document]:
     ext = os.path.splitext(file_path)[1].lower()
     file_name = os.path.basename(file_path)
 
-    print(f"✂️ 开始智能切分 [{file_name}] ...")
+    print(f"✂ 开始智能切分 [{file_name}] ...")
 
     if ext in ['.pdf', '.md', '.txt', '.docx']:
         return chunk_markdown_or_text(text_content, file_name)
@@ -138,11 +140,11 @@ def intelligent_chunker(text_content: str, file_path: str) -> list[Document]:
 # ==========================================
 if __name__ == "__main__":
     # 🌟 从解析器文件中引入统一读取接口
-    from code.Executor.RAG.document_parser import read_any_file
+    from RAG.document_parser import read_any_file
     print("🚀 启动 Chunker 模块本地真实文件遍历测试...\n")
 
     # 真实测试文件路径
-    base_dir = r"../test2/parser_test"
+    base_dir = r"../test/2/parser_test"
 
     # 6 个真实测试文件
     test_files = [

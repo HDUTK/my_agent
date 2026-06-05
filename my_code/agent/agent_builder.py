@@ -19,8 +19,8 @@ from pydantic_ai import Agent, Tool
 from pydantic_ai.exceptions import ModelRetry
 from mcp.client.session import ClientSession
 
-from agent_engine import UniversalPlanExecuteEngine
-from llm_factory import get_llm_model
+from agent.agent_engine import UniversalPlanExecuteEngine
+from agent.llm_factory import get_llm_model
 from utils.utils import load_prompt
 from RAG.document_parser import read_any_file
 
@@ -31,7 +31,7 @@ from RAG.document_parser import read_any_file
 def make_mcp_tool(session: ClientSession):
     """闭包工厂：接收一个 session，返回一个绑定好的工具调用网关"""
     async def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
-        print(f"\n[🔌 远程调用] 正在请求 Server 执行: {tool_name}")
+        print(f"\n[ 远程调用] 正在请求 Server 执行: {tool_name}")
         print(f"   传入参数: {arguments}")
         try:
             result = await session.call_tool(tool_name, arguments)
@@ -40,7 +40,7 @@ def make_mcp_tool(session: ClientSession):
 
             # 2. 打印工具的返回结果（如果超过 300 字就截断显示，防止刷屏）
             preview = final_result if len(final_result) < 300 else final_result[:300] + "\n... (内容太长，已省略后续输出)"
-            print(f"[📥 Server 返回]\n{preview}\n")
+            print(f"[ Server 返回]\n{preview}\n")
 
             return final_result
         except Exception as e:
@@ -63,10 +63,10 @@ def make_mcp_tool(session: ClientSession):
 
             # 🌟 诊断 3：如果是代码逻辑/GBK编码等致命死错
             else:
-                print(f"❌ [致命错误] {e}")
+                print(f" [致命错误] {e}")
                 # 核心拦截：直接返回普通字符串作为结果
                 # 大模型看到这句话后，就知道工具废了，不会再执着重试，而是直接回复用户
-                return f"🚨 致命系统错误: {str(e)}。请立即放弃重试此工具，并直接向用户汇报系统故障！"
+                return f" 致命系统错误: {str(e)}。请立即放弃重试此工具，并直接向用户汇报系统故障！"
     return call_mcp_tool
 
 
@@ -100,7 +100,7 @@ class UniversalEngineTool:
         一旦你判断用户的任务需要调用此引擎，请【立即、马上】发起 Tool Call！
         绝对禁止向用户回复“好的”、“请稍等”、“我正在为您提取”等任何过渡性寒暄废话！只要你开口说普通文本，系统就会崩溃！
         """
-        print(f"\n🚀 [主控中枢] 收到万能调度请求，正在组装上下文并移交 Universal 引擎...")
+        print(f"\n [主控中枢] 收到万能调度请求，正在组装上下文并移交 Universal 引擎...")
 
         # 1. 泛化多文件读取引擎
         context_text = ""
@@ -123,9 +123,9 @@ class UniversalEngineTool:
             with open(save_to, "w", encoding="utf-8") as f:
                 json.dump(results, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            return f"❌ 流水线执行成功，但保存到 {save_to} 时失败: {e}"
+            return f" 流水线执行成功，但保存到 {save_to} 时失败: {e}"
 
-        return f"🎉 复杂流水线已在后台成功执行！共完成 {len(results)} 个步骤，详细结果已持久化到 {save_to}。请向用户汇报成功摘要。"
+        return f" 复杂流水线已在后台成功执行！共完成 {len(results)} 个步骤，详细结果已持久化到 {save_to}。请向用户汇报成功摘要。"
 
 
 # ==========================================

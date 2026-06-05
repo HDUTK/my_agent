@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-function description: 此文件用于
+function description: 此文件用于诊断版 - 检查可用的 Gemini 模型并自带网络自检功能
 author: TangKan
 contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
@@ -10,11 +10,6 @@ version: V1.0
 Target Python:  3.14 -> 3.12
 """
 
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-function description: 诊断版 - 检查可用的 Gemini 模型并自带网络自检功能
-"""
 
 import os
 import requests

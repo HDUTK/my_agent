@@ -11,29 +11,16 @@ Target Python:  3.14 -> 3.12
 """
 
 import os
+from utils.utils import apply_model_environment
+from config.agent_config import PDF_PARSER_TIMEOUT
 
-# 🌟 强制控制台和子进程使用 UTF-8 编码
-os.environ["PYTHONIOENCODING"] = "utf-8"
+# 注入针对 Marker PDF 视觉模型的环境配置（锁定 HuggingFace 缓存与网络断路器）
+apply_model_environment("marker_pdf")
+
 # 🌟 管住所有 Python 派生的子进程（强制无视 Windows 设定，使用 UTF-8）
 os.environ["PYTHONUTF8"] = "1"
 
-# 下载模型全都存到 D 盘这个文件夹
-os.environ["HF_HOME"] = "D:/Python31210/HuggingFace_Models"
-
-# 强行关掉所有代理，防止 Clash/V2ray 端口拦截
-os.environ['HTTP_PROXY'] = ""
-os.environ['HTTPS_PROXY'] = ""
-
-# 强行接管底层的下载通道，指向国内镜像源！
-# 【已注释】因为全离线了，不需要配镜像源去查网络了
-# (需要检查更新模型时打开，同时注释掉之后下面两行代码)
-# os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-# 开启终极离线模式：严禁偷偷连网检查更新，纯本地物理读取！
-# （注意：因为 marker_single 是子进程，它会自动继承这两个离线环境变量）
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-
-
+# 业务导包
 import pandas as pd
 import docx
 import fitz  # PyMuPDF
@@ -72,7 +59,7 @@ def parse_pdf(file_path: str) -> str:
         os.makedirs(output_dir, exist_ok=True)
 
         print(
-            f"\n👁️ [视觉解析启动] 正在后台启动 Marker 分析文档: {base_name}.pdf ... (若是首次运行将自动下载模型权重，请耐心等待)")
+            f"\n👁 [视觉解析启动] 正在后台启动 Marker 分析文档: {base_name}.pdf ... (若是首次运行将自动下载模型权重，请耐心等待)")
 
         # 2. 构建最新版 1.x 的极简命令行指令
         # 去掉了已经废弃的 --langs 和 --batch_multiplier
@@ -83,18 +70,15 @@ def parse_pdf(file_path: str) -> str:
             "--output_dir", output_dir
         ]
 
-        # 3. 执行子进程并阻塞等待 (超时设为 15 分钟)
+        # 3. 执行子进程并阻塞等待
         result = subprocess.run(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=False,
             encoding="utf-8",
-            timeout=900
+            timeout=PDF_PARSER_TIMEOUT
         )
-
-        # stdout_text = smart_decode(result.stdout)
-        # stderr_text = smart_decode(result.stderr)
 
         if result.returncode != 0:
             return f"[Marker解析失败]: 子进程报错\n{result.stderr}"
@@ -115,7 +99,7 @@ def parse_pdf(file_path: str) -> str:
         with open(expected_md_file, "r", encoding="utf-8") as f:
             md_content = f.read()
 
-        print(f"✅ [解析成功] 获得纯净 Markdown，文本长度: {len(md_content)} 字符")
+        print(f" [解析成功] 获得纯净 Markdown，文本长度: {len(md_content)} 字符")
         return md_content
 
     except subprocess.TimeoutExpired:
@@ -254,6 +238,6 @@ def read_any_file(file_path: str) -> str:
 # 测试代码 (当直接运行此文件时执行)
 if __name__ == "__main__":
     # 可以随便丢一个 pdf 或 xlsx 进去测试一下提取效果
-    print(read_any_file("../test2/parser_test/博士在读成绩单.pdf"))
+    print(read_any_file("../test/2/parser_test/博士在读成绩单.pdf"))
     pass
 

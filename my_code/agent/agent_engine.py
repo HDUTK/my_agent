@@ -10,6 +10,8 @@ version: V1.0
 Target Python:  3.14 -> 3.12
 """
 
+from config.agent_config import PLANNER_MAX_TOKENS, EXECUTOR_MAX_TOKENS
+
 from dataclasses import dataclass
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -58,7 +60,7 @@ class UniversalPlanExecuteEngine:
             goal: str,
             context: str = "",
             predefined_steps: Optional[list[str]] = None,
-            max_tokens: int = 3000
+            max_tokens: int = EXECUTOR_MAX_TOKENS
     ) -> dict[str, str]:
         """
         启动万能流水线
@@ -68,7 +70,7 @@ class UniversalPlanExecuteEngine:
         :param max_tokens: 最大token数量
         :return: 包含所有步骤详细执行结果的字典
         """
-        print(f"\n⚙️ [引擎启动] 终极目标: {goal}")
+        print(f"\n⚙ [引擎启动] 终极目标: {goal}")
         state = EngineState(goal=goal, context=context, scratchpad={})
 
         # -----------------------------------
@@ -76,22 +78,22 @@ class UniversalPlanExecuteEngine:
         # -----------------------------------
         if predefined_steps:
             steps = predefined_steps
-            print("📝 检测到预设任务清单，跳过 AI 规划，直接采用预设步骤。")
+            print(" 检测到预设任务清单，跳过 AI 规划，直接采用预设步骤。")
         else:
-            print("🧠 正在呼叫规划师进行任务拆解...")
+            print(" 正在呼叫规划师进行任务拆解...")
             plan_resp = await self.planner.run(
                 f"目标：{goal}\n\n背景上下文：\n{context[:2000]}...",  # 规划时不必传全文
-                model_settings=ModelSettings(max_tokens=800)
+                model_settings=ModelSettings(max_tokens=PLANNER_MAX_TOKENS)
             )
 
             # 🌟 结算规划师的 Token 消耗
             usage = plan_resp.usage()
             print(
-                f"📊 [Token结算 - 规划师] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}")
+                f" [Token结算 - 规划师] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}")
 
             steps = plan_resp.output.steps
 
-        print(f"📋 执行清单已确认，共 {len(steps)} 步：")
+        print(f" 执行清单已确认，共 {len(steps)} 步：")
         for i, s in enumerate(steps):
             print(f"   [{i + 1}] {s}")
 
@@ -101,7 +103,7 @@ class UniversalPlanExecuteEngine:
         detailed_results = {}
 
         for i, current_task in enumerate(steps):
-            print(f"\n👷 [执行节点 {i + 1}/{len(steps)}] 正在处理: {current_task}...")
+            print(f"\n [执行节点 {i + 1}/{len(steps)}] 正在处理: {current_task}...")
 
             # 动态组装上下文：让大模型永远拥有大局观，但没有历史包袱
             scratchpad_view = "\n".join([f"- {k}: {v}" for k, v in state.scratchpad.items()]) or "目前是第一步，暂无历史进度。"
@@ -130,15 +132,15 @@ class UniversalPlanExecuteEngine:
             # 🌟 结算当前执行节点的 Token 消耗
             usage = resp.usage
             print(
-                f"📊 [Token结算 - 执行节点 {i + 1}] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}")
+                f" [Token结算 - 执行节点 {i + 1}] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}")
 
             # 完整结果落袋为安
             content = "".join(content_chunks)
             detailed_results[current_task] = content
 
             # 记忆物理切除：只保留前 50 个字存入便签本供下一步参考
-            snippet = content[:50].replace("\n", "") + "..."
-            state.scratchpad[current_task] = f"[✅ 完成] 摘要: {snippet}"
+            snippet = content[:100].replace("\n", "") + "..."
+            state.scratchpad[current_task] = f"[ 完成] 摘要: {snippet}"
 
-        print("\n🎉 [引擎完工] 所有分布式思维链节点已执行完毕！")
+        print("\n [引擎完工] 所有分布式思维链节点已执行完毕！")
         return detailed_results

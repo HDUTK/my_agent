@@ -11,19 +11,6 @@ version: V1.0
 Target Python: 
 """
 
-
-import os
-import warnings
-
-# 🌟 物理断网
-warnings.filterwarnings("ignore")
-os.environ["PYTHONIOENCODING"] = "utf-8"
-os.environ["HF_HOME"] = "D:/Python31210/HuggingFace_Models"
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ['HTTP_PROXY'] = ""
-os.environ['HTTPS_PROXY'] = ""
-
 from RAG.rag_retriever import HybridRerankRetriever
 
 
@@ -47,7 +34,7 @@ class LocalKnowledgeExpert:
             return "⚠️ [系统提示]：本地数据库中未检索到任何与此问题相关的记录。请使用你的知识进行回答，并向用户明确说明：本地知识库无相关记录。"
 
         # 把捞出来的原文拼在一起
-        result_text = "【以下是本地数据库检索到的绝密参考资料】\n"
+        result_text = "【以下是本地数据库检索到的参考资料】\n"
         for i, doc in enumerate(best_docs):
             result_text += f"\n--- 资料片段 {i + 1} (来源: {doc.metadata.get('source', '未知')}) ---\n"
             result_text += doc.page_content + "\n"

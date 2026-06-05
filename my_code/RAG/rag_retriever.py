@@ -10,44 +10,18 @@ version: V1.0
 Target Python: 
 """
 
+from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME
+from utils.utils import apply_model_environment
 
-import os
-import warnings
-
-
-# ==========================================
-# 🌟 基础环境配置
-# ==========================================
-warnings.filterwarnings("ignore", message=".*1Torch was not compiled with flash attention.*")
-os.environ["PYTHONIOENCODING"] = "utf-8"
-os.environ["HF_HOME"] = "D:/Python31210/HuggingFace_Models"
-
-# 💡 【特别提示】首次运行此脚本时，请将下面三行代码运行！！
-# 这样程序才能连网去把 1.1GB 的重排模型下载到你的 D 盘新家里。下载完一次后，再重新把它们注释掉，即可实现全离线。
-# os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-# os.environ["HF_HUB_OFFLINE"] = "0"
-# os.environ["TRANSFORMERS_OFFLINE"] = "0"
-
-# 如果你已经下载过了，想切换到纯离线模式，就把上面三行注释掉，解开下面两行：
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-
-os.environ['HTTP_PROXY'] = ""
-os.environ['HTTPS_PROXY'] = ""
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
+# 连续为本文件需要的两个模型注入配置
+apply_model_environment("bge_m3")
+apply_model_environment("bge_reranker")
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
-
-
-# 数据库与集合配置
-DB_PERSIST_PATH = r"E:\Vector_Database_for_Agent\db_storage\chroma_db"
-COLLECTION_NAME = "tk_knowledge"
 
 
 class HybridRerankRetriever:
