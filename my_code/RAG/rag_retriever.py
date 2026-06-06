@@ -12,7 +12,7 @@ Target Python:
 
 from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
 from config.agent_config import MODEL_REGISTRY
-from utils.utils import apply_model_environment
+from utils.core_utils import apply_model_environment
 from utils.logger_print import sys_logger, print_and_log
 
 # 连续为本文件需要的两个模型注入配置

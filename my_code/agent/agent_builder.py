@@ -21,7 +21,7 @@ from mcp.client.session import ClientSession
 
 from agent.agent_engine import UniversalPlanExecuteEngine
 from agent.llm_factory import get_llm_model
-from utils.utils import load_prompt
+from utils.core_utils import load_prompt
 from RAG.document_parser import read_any_file
 from utils.logger_print import sys_logger
 

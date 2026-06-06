@@ -29,7 +29,7 @@ from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
 # 导入其他的模块
-from utils.utils import trim_history
+from utils.core_utils import trim_history
 from agent.agent_builder import build_agent_with_mcp
 from utils.logger_print import sys_logger, print_and_log
 # 配置

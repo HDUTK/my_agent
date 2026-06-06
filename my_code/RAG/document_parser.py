@@ -12,7 +12,7 @@ Target Python:  3.14 -> 3.12
 
 import os
 
-from utils.utils import apply_model_environment
+from utils.core_utils import apply_model_environment
 from utils.logger_print import sys_logger, print_and_log
 from config.agent_config import PDF_PARSER_TIMEOUT
 

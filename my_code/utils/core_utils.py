@@ -17,7 +17,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart
 from config.system_config import PROMPTS_DIR
 
 from config.agent_config import MODEL_REGISTRY
-from logger_print import sys_logger, print_and_log
+from logger_print import sys_logger
 
 
 # ==========================================
