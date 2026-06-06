@@ -18,11 +18,11 @@ import hashlib
 from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
 from config.agent_config import MODEL_REGISTRY
 from utils.core_utils import apply_model_environment
-from utils.logger_print import sys_logger, print_and_log
+from utils.logger_print import print_and_log
 
 
 # 读取bge_m3模型的配置
-apply_model_environment("bge_m3")
+apply_model_environment(MODEL_REGISTRY['bge_m3']['model_name_simple'])
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -51,7 +51,7 @@ def get_bge_embeddings():
     🌟 加载智源最新一代 BGE-M3 多语言/长文本向量模型 (纯本地运行)
     首次运行会自动去镜像源下载约 2.2GB 的模型权重，之后永久本地秒加载。
     """
-    print_and_log(" 正在加载 BGE-M3 顶级向量模型引擎...", "info")
+    print_and_log(" 正在加载 " + MODEL_REGISTRY['bge_m3']['model_name'] + "  顶级向量模型引擎...", "info")
 
     # 🌟 模型名称 bge-m3
     model_name = MODEL_REGISTRY['bge_m3']['model_name']
@@ -67,7 +67,7 @@ def get_bge_embeddings():
         model_kwargs=model_kwargs,
         encode_kwargs=encode_kwargs
     )
-    print_and_log(" BGE-M3 模型加载完毕！", "info")
+    print_and_log(MODEL_REGISTRY['bge_m3']['model_name'] + " 模型加载完毕！", "info")
     return embeddings
 
 

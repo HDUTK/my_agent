@@ -29,7 +29,7 @@ def get_llm_model(platform: str):
     # 1. Google Gemini
     # ----------------------------------------
     if platform == "gemini":
-        model_name = LLM_CONFIG["gemini"]["type"]
+        model_name = LLM_CONFIG["model"]["gemini"]["type"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 Google Gemini 模型: {model_name}")
         return GoogleModel(model_name)
 
@@ -44,7 +44,7 @@ def get_llm_model(platform: str):
 
         os.environ["OPENAI_API_KEY"] = api_key
 
-        model_name = LLM_CONFIG["gpt"]["type"]
+        model_name = LLM_CONFIG["model"]["gpt"]["type"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 OpenAI 模型: {model_name}")
         return OpenAIChatModel(model_name)
 
@@ -62,7 +62,7 @@ def get_llm_model(platform: str):
         os.environ["OPENAI_BASE_URL"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
         # 现在只需要传一个纯净的名字，括号里什么都不用加！
-        model_name = LLM_CONFIG["qwen"]["type"]
+        model_name = LLM_CONFIG["model"]["qwen"]["type"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 阿里通义千问模型: {model_name}")
         return OpenAIChatModel(model_name)
 
@@ -78,7 +78,7 @@ def get_llm_model(platform: str):
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_BASE_URL"] = "https://open.bigmodel.cn/api/paas/v4/"
 
-        model_name = LLM_CONFIG["zhipu"]["type"]
+        model_name = LLM_CONFIG["model"]["zhipu"]["type"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 智谱 GLM 模型: {model_name}")
         return OpenAIChatModel(model_name)
 
@@ -94,7 +94,7 @@ def get_llm_model(platform: str):
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_BASE_URL"] = "https://api.hunyuan.cloud.tencent.com/v1"
 
-        model_name = LLM_CONFIG["hunyuan"]["type"]
+        model_name = LLM_CONFIG["model"]["hunyuan"]["type"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 腾讯混元模型: {model_name}")
         return OpenAIChatModel(model_name)
 
@@ -110,7 +110,7 @@ def get_llm_model(platform: str):
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_BASE_URL"] = "https://spark-api-open.xf-yun.com/v1"
 
-        model_name = LLM_CONFIG["spark"]["type"]
+        model_name = LLM_CONFIG["model"]["spark"]["type"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 讯飞星火模型: {model_name}")
         return OpenAIChatModel(model_name)
 

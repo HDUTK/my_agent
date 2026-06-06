@@ -14,32 +14,36 @@ Target Python:
 # LLM相关
 # ==========================================
 LLM_CONFIG = {
-    "gemini": {
-        "model_name": "gemini",
-        # gemini-2.0-flash/gemini-2.5-flash/gemini-2.5-pro/gemini-3-flash-preview/
-        # gemini-3-pro-preview/gemini-3.1-pro-preview/gemini-3.5-flash
-        "type": "gemini-2.5-flash"
+    "model": {
+        "gemini": {
+            "model_name": "gemini",
+            # gemini-2.0-flash/gemini-2.5-flash/gemini-2.5-pro/gemini-3-flash-preview/
+            # gemini-3-pro-preview/gemini-3.1-pro-preview/gemini-3.5-flash
+            "type": "gemini-2.5-flash"
+        },
+        "gpt": {
+            "model_name": "gpt",
+            "type": "gpt-4o-mini"
+        },
+        "qwen": {
+            "model_name": "qwen",
+            "type": "qwen-plus"
+        },
+        "zhipu": {
+            "model_name": "zhipu",
+            "type": "glm-4-flash"
+        },
+        "hunyuan": {
+            "model_name": "hunyuan",
+            "type": "hunyuan-lite"
+        },
+        "spark": {
+            "model_name": "spark",
+            "type": "4.0Ultra"
+        }
     },
-    "gpt": {
-        "model_name": "gpt",
-        "type": "gpt-4o-mini"
-    },
-    "qwen": {
-        "model_name": "qwen",
-        "type": "qwen-plus"
-    },
-    "zhipu": {
-        "model_name": "zhipu",
-        "type": "glm-4-flash"
-    },
-    "hunyuan": {
-        "model_name": "hunyuan",
-        "type": "hunyuan-lite"
-    },
-    "spark": {
-        "model_name": "spark",
-        "type": "4.0Ultra"
-    }
+    "input_max_tokens": 3000,  # 限制大模型最多生成 3000 个 Token (防废话，防破产)
+    "history_max_messages": 6,  # 每次提问前，先对历史记忆进行安全截断,保留最近 max_messages 条信息
 }
 
 # ==========================================
@@ -76,13 +80,17 @@ CHUNK_CONFIG = {
 MODEL_REGISTRY = {
     "bge_m3": {
         "model_name": "BAAI/bge-m3",
+        "model_name_simple": "bge-m3",
         "device": "cuda",
         "offline": True,  # 🌟 是否开启终极离线模式
         "use_mirror": True,  # 🌟 是否使用国内镜像源（若 offline=True，此项自动失效）
-        "local_path": "D:/Python31210/HuggingFace_Models"
+        "local_path": "D:/Python31210/HuggingFace_Models",
+        "search_number": 15  # 从向量数据库的海量数据里先捞出 x 条最神似的
     },
+    "BM25_search_number": 10,  # 关键词初筛时获取最形似的前 y 条结果
     "bge_reranker": {
         "model_name": "BAAI/bge-reranker-v2-m3",
+        "model_name_simple": "bge-reranker",
         "device": "cuda",
         "offline": True,  # 🌟 比如重排模型想允许联网检查更新或首次下载
         "use_mirror": True,  # 🌟 联网时使用国内镜像（若 offline=True，此项自动失效）

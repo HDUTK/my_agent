@@ -17,12 +17,11 @@ from core_tools import tools
 
 from RAG.local_RAG import LocalKnowledgeExpert
 from utils.logger_print import sys_logger
-
+from config.agent_config import RERANK_THRESHOLD, RETRIEVER_TOP_K
 
 # 🌟 屏蔽底层库的 INFO 级别刷屏日志，只放行 WARNING 和 ERROR
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("mcp").setLevel(logging.WARNING)
-
 
 # 1. 创建标准化 Server 实例
 mcp = FastMCP("my_server")
@@ -62,10 +61,12 @@ def consult_local_knowledge_expert(query: str) -> str:
     sys_logger.info(f" [MCP Tool 触发] 正在向后台老专家提问: {query}")
 
     # 拿到的是纯原始文本！
-    raw_docs_text = expert_instance.retrieve_docs(query, threshold=0.35)
+    raw_docs_text = expert_instance.retrieve_docs(query, threshold=RERANK_THRESHOLD,
+                                                  top_k=RETRIEVER_TOP_K)
 
     sys_logger.info(" [MCP Tool 完毕] 本地知识库已给出详细解答。")
     return raw_docs_text
+
 
 # 2. 自动扫描并注册 tools.py 中的所有公开函数
 for name, func in inspect.getmembers(tools, inspect.isfunction):

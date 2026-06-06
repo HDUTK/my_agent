@@ -35,7 +35,13 @@ COLLECTION_NAME = "tk_knowledge"
 HF_MODELS_PATH = "D:/Python31210/HuggingFace_Models"
 
 # 日志输出目录
-LOG_DIR = str(BASE_DIR / "logs")
+LOG_CONFIG = {
+    "path" : str(BASE_DIR / "logs"),
+    "rotation" : 5, # 每当日志文件达到 x MB 时，自动新建一个文件
+    "retention": 7,  # 历史日志保留 x 天，防止撑爆硬盘
+    # 日志格式
+    "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+}
 
 # cpu/cuda
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'

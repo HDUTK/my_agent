@@ -11,10 +11,8 @@ version: V1.0
 Target Python: 
 """
 
-from utils.logger_print import sys_logger
-
 from RAG.rag_retriever import HybridRerankRetriever
-from utils.logger_print import sys_logger, print_and_log
+from utils.logger_print import sys_logger
 
 
 class LocalKnowledgeExpert:
@@ -26,12 +24,12 @@ class LocalKnowledgeExpert:
         sys_logger.info("【本地知识检索器】就绪，等待 MCP 索要数据！")
         sys_logger.info("=" * 50 + "\n")
 
-    def retrieve_docs(self, user_query: str, threshold: float = 0.3) -> str:
+    def retrieve_docs(self, user_query: str, threshold: float = 0.3, top_k: int = 3) -> str:
         """
-        核心对外接口：只负责捞出及格的 Top 3 原文，拼成字符串返回。
+        核心对外接口：只负责捞出及格的 Top k 原文，拼成字符串返回。
         threshold 参数：低于此分数的文档将被直接判定为不相关并丢弃。
         """
-        best_docs = self.retriever.search(user_query, score_threshold=threshold, top_k=3)
+        best_docs = self.retriever.search(user_query, score_threshold=threshold, top_k=top_k)
 
         if not best_docs:
             message = "⚠️ [系统提示]：本地数据库中未检索到任何与此问题相关的记录。请使用你的知识进行回答，并向用户明确说明：本地知识库无相关记录。"
@@ -47,4 +45,3 @@ class LocalKnowledgeExpert:
         # 🌟 将从本地提取、准备喂给大模型的资料留档在日志里，方便溯源
         sys_logger.info(f"[向大模型输送数据]\n{result_text}")
         return result_text
-

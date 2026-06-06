@@ -16,8 +16,8 @@ from utils.core_utils import apply_model_environment
 from utils.logger_print import sys_logger, print_and_log
 
 # 连续为本文件需要的两个模型注入配置
-apply_model_environment("bge_m3")
-apply_model_environment("bge_reranker")
+apply_model_environment(MODEL_REGISTRY['bge_m3']['model_name_simple'])
+apply_model_environment(MODEL_REGISTRY['bge_reranker']['model_name_simple'])
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -36,7 +36,7 @@ class HybridRerankRetriever:
         sys_logger.info(" 正在初始化企业级混合检索与重排引擎...")
 
         # 1. 初始化左路：加载 BGE-M3 向量模型
-        sys_logger.info(" 正在加载左路：BGE-M3 向量模型 (GPU 加速)...")
+        sys_logger.info(" 正在加载左路：" + MODEL_REGISTRY['bge_m3']['model_name_simple'] + " 向量模型 (GPU 加速)...")
         self.embeddings = HuggingFaceEmbeddings(
             model_name=MODEL_REGISTRY["bge_m3"]["model_name"],
             model_kwargs={'device': DEVICE},
@@ -72,9 +72,9 @@ class HybridRerankRetriever:
         self.bm25 = BM25Okapi(tokenized_corpus)
 
         # 4. 初始化终极总监：加载 BGE-Reranker-v2-m3 重排模型
-        sys_logger.info(" 正在加载终极重排大模型: bge-reranker-v2-m3 ...")
+        sys_logger.info(" 正在加载终极重排大模型: " + MODEL_REGISTRY['bge_reranker']['model_name_simple'] + " ...")
         # 使用 CrossEncoder 架构直接加载重排器，并强制推向 CUDA 显卡加速
-        self.reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cuda")
+        self.reranker = CrossEncoder(MODEL_REGISTRY['bge_reranker']['model_name'], device="cuda")
 
         sys_logger.info(" 混合检索与重排引擎全部就绪！你可以开始精准大海捞针了！")
         sys_logger.info("=" * 50 + "\n")
@@ -86,15 +86,15 @@ class HybridRerankRetriever:
         sys_logger.info(f" 收到用户深度提问: '{query}'")
 
         # ------------ 【第一步：左路向量初筛】 ------------
-        # 从海量数据里先捞出 15 条最神似的
-        dense_results = self.vector_db.similarity_search(query, k=15)
+        # 从海量数据里先捞出 x 条最神似的
+        dense_results = self.vector_db.similarity_search(query, k=MODEL_REGISTRY["bge_m3"]["search_number"])
         sys_logger.info(f"  -> [左路向量] 成功初筛出 {len(dense_results)} 条语义相关文档。")
 
         # ------------ 【第二步：右路关键词初筛】 ------------
         # 将问题也切成字的列表，丢给 BM25 算法去算分
         tokenized_query = list(query)
-        # 获取最形似的前 10 条结果
-        sparse_results = self.bm25.get_top_n(tokenized_query, self.all_documents, n=10)
+        # 获取最形似的前 y 条结果
+        sparse_results = self.bm25.get_top_n(tokenized_query, self.all_documents, n=MODEL_REGISTRY["BM25_search_number"])
         sys_logger.info(f"  -> [右路关键词] 成功初筛出 {len(sparse_results)} 条字面精准文档。")
 
         # ------------ 【第三步：合并与绝对去重】 ------------
@@ -112,7 +112,7 @@ class HybridRerankRetriever:
             return []
 
         # ------------ 【第四步：技术总监 BGE-Reranker 终极重排】 ------------
-        sys_logger.info(f" 启动 BGE-Reranker 神经网络进行交叉对比打分...")
+        sys_logger.info(f" 启动 " + MODEL_REGISTRY["bge_reranker"]["model_name_simple"] + " 神经网络进行交叉对比打分...")
 
         # 组装重排模型需要的标准格式：[[问题, 文档1文本], [问题, 文档2文本], ...]
         pairs = [[query, doc.page_content] for doc in candidates]
