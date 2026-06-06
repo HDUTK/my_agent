@@ -14,6 +14,8 @@ Target Python: 3.12
 
 import os
 
+from utils.logger_print import print_and_log
+
 from config.agent_config import CHUNK_CONFIG
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -114,13 +116,13 @@ def intelligent_chunker(text_content: str, file_path: str) -> list[Document]:
     🌟 路由中枢：根据原始文件扩展名，将文本分发给最合适的切分器
     """
     if not text_content or text_content.startswith("⚠️") or text_content.startswith("["):
-        print(f"⚠️ 跳过切分：文件 {file_path} 内容为空或解析报错。")
+        print_and_log(f"⚠️ 跳过切分：文件 {file_path} 内容为空或解析报错。", "warning")
         return []
 
     ext = os.path.splitext(file_path)[1].lower()
     file_name = os.path.basename(file_path)
 
-    print(f"✂ 开始智能切分 [{file_name}] ...")
+    print_and_log(f"✂ 开始智能切分 [{file_name}] ...", "info")
 
     if ext in ['.pdf', '.md', '.txt', '.docx']:
         return chunk_markdown_or_text(text_content, file_name)
@@ -141,7 +143,7 @@ def intelligent_chunker(text_content: str, file_path: str) -> list[Document]:
 if __name__ == "__main__":
     # 🌟 从解析器文件中引入统一读取接口
     from RAG.document_parser import read_any_file
-    print("🚀 启动 Chunker 模块本地真实文件遍历测试...\n")
+    print_and_log("🚀 启动 Chunker 模块本地真实文件遍历测试...\n", "info")
 
     # 真实测试文件路径
     base_dir = r"../test/2/parser_test"
@@ -159,48 +161,48 @@ if __name__ == "__main__":
 
     for file_names in test_files:
         file_path = os.path.join(base_dir, file_names)
-        print("\n" + "=" * 70)
-        print(f"🎯 正在测试目标文件: {file_names}")
-        print("=" * 70)
+        print_and_log("\n" + "=" * 70, "info")
+        print_and_log(f"🎯 正在测试目标文件: {file_names}", "info")
+        print_and_log("=" * 70, "info")
 
         # 1. 检查文件是否存在
         if not os.path.exists(file_path):
-            print(f"❌ 找不到文件: {file_path}\n请检查路径是否正确。")
+            print_and_log(f"❌ 找不到文件: {file_path}\n请检查路径是否正确。", "error")
             continue
 
         # 2. 呼叫 Parser 提取纯文本
-        print("⏳ 正在解析提取纯文本...")
+        print_and_log("⏳ 正在解析提取纯文本...", "info")
         raw_text = read_any_file(file_path)
 
         if raw_text.startswith("⚠️") or raw_text.startswith("["):
-            print(f"❌ 解析异常终止:\n{raw_text}")
+            print_and_log(f"❌ 解析异常终止:\n{raw_text}", "error")
             continue
 
         # 3. 呼叫 Chunker 进行智能切分与打标签
-        print("⏳ 正在进行智能切分 (Chunking)...")
+        print_and_log("⏳ 正在进行智能切分 (Chunking)...", "info")
         # 假设当前文件中的核心路由函数名为 intelligent_chunker
         chunks = intelligent_chunker(raw_text, file_names)
 
         if not chunks:
-            print("⚠️ 警告：切分后没有获得任何块 (Chunk)。")
+            print_and_log("⚠️ 警告：切分后没有获得任何块 (Chunk)。", "warning")
             continue
 
-        print(f"✅ 完美！该文档被切分成了 {len(chunks)} 个 Chunk。")
+        print_and_log(f"✅ 完美！该文档被切分成了 {len(chunks)} 个 Chunk。", "info")
 
         # 4. 质检抽查 (打印前 2 个 Chunk，限制字数防刷屏)
-        print("-" * 40 + " 抽查预览 " + "-" * 40)
+        print_and_log("-" * 40 + " 抽查预览 " + "-" * 40, "info")
         display_count = min(2, len(chunks))
 
         for i in range(display_count):
             chunk = chunks[i]
-            print(f"【📄 第 {i + 1} 块 Chunk】")
-            print(f"🏷️ 元数据 (Metadata): {chunk.metadata}")
+            print_and_log(f"【📄 第 {i + 1} 块 Chunk】", "info")
+            print_and_log(f"🏷️ 元数据 (Metadata): {chunk.metadata}", "info")
 
             content_preview = chunk.page_content
             if len(content_preview) > 200:
                 content_preview = content_preview[:200] + "\n... (内容过长，已折叠展示) ..."
 
-            print(f"📝 文本内容:\n{content_preview}\n")
-            print("-" * 70)
+            print_and_log(f"📝 文本内容:\n{content_preview}\n", "info")
+            print_and_log("-" * 70, "info")
 
-    print("\n🎉 所有本地真实文件 Chunker 单元测试运行完毕！")
+    print_and_log("\n🎉 所有本地真实文件 Chunker 单元测试运行完毕！", "info")

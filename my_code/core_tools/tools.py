@@ -17,6 +17,8 @@ import psutil
 import pandas as pd
 import docx
 
+from utils.logger_print import sys_logger, print_and_log
+
 
 def get_host_info() -> str:
     """
@@ -47,11 +49,17 @@ def read_file(file_path: str) -> str:
     """读取指定路径的文件内容，返回字符串"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
+            msg = f.read()
+            sys_logger.info(f"[工具执行] 成功读取文件: {file_path} (长度: {len(msg)})")
+            return msg
     except FileNotFoundError:
-        return f"错误：文件 '{file_path}' 不存在"
+        msg = f"错误：文件 '{file_path}' 不存在"
+        sys_logger.error(msg)
+        return msg
     except Exception as e:
-        return f"读取文件时出错：{e}"
+        msg = f"读取文件时出错：{e}"
+        sys_logger.error(msg)
+        return msg
 
 
 def get_file_names(folder_path: str) -> list[str]:
@@ -61,15 +69,16 @@ def get_file_names(folder_path: str) -> list[str]:
         entries = os.listdir(folder_path)
         # 过滤出文件（保留文件名，不含路径）
         files = [f for f in entries if os.path.isfile(os.path.join(folder_path, f))]
+        sys_logger.info(f"[工具执行] 成功获取文件夹 '{folder_path}' 的文件列表，共 {len(files)} 个文件。")
         return files
     except FileNotFoundError:
-        print(f"错误：文件夹 '{folder_path}' 不存在")
+        sys_logger.error(f"错误：文件夹 '{folder_path}' 不存在")
         return []
     except PermissionError:
-        print(f"错误：没有权限访问文件夹 '{folder_path}'")
+        sys_logger.error(f"错误：没有权限访问文件夹 '{folder_path}'")
         return []
     except Exception as e:
-        print(f"发生未知错误：{e}")
+        sys_logger.error(f"获取文件列表发生未知错误：{e}")
         return []
 
 
@@ -82,17 +91,17 @@ def rename_file(file_path: str, new_name: str) -> bool:
     """
     try:
         if not os.path.isfile(file_path):
-            print(f"错误：文件 '{file_path}' 不存在")
+            sys_logger.warning(f"错误：文件 '{file_path}' 不存在")
             return False
 
         dir_name = os.path.dirname(file_path)
         new_path = os.path.join(dir_name, new_name)
 
         os.rename(file_path, new_path)
-        print(f"重命名成功：{file_path} -> {new_path}")
+        sys_logger.info(f"[工具执行] 重命名成功：{file_path} -> {new_path}")
         return True
     except Exception as e:
-        print(f"重命名失败：{e}")
+        sys_logger.error(f"重命名失败：{e}")
         return False
 
 
@@ -103,25 +112,33 @@ def query_csv(file_path: str, query_string: str) -> str:
     1. 必须用 Pandas 的 query 语法编写 query_string。
     2. 请严格使用 CSV 的真实列名（通常是英文，如 time, air_temperature）。
     """
-    print(f"[工具执行] 正在查询 CSV: {file_path} | 条件: {query_string}")
+    sys_logger.info(f"[工具执行] 正在查询 CSV: {file_path} | 条件: {query_string}")
 
     if not os.path.exists(file_path):
-        return f"错误: 找不到文件 {file_path}"
+        msg = f"错误: 找不到文件 {file_path}"
+        sys_logger.error(msg)
+        return msg
 
     try:
         # 1. 读取 CSV (消除警告)
         df = pd.read_csv(filepath_or_buffer=file_path)
 
         if not isinstance(df, pd.DataFrame):
-            return "错误: 读取的结果不是有效的 DataFrame"
+            msg = "错误: 读取的结果不是有效的 DataFrame"
+            sys_logger.error(msg)
+            return msg
 
         # 2. 执行大模型写好的查询语句
         result_df = df.query(query_string)
 
-        # 🌟 核心升级 1：查不到数据时的“格式纠偏”
+        # 🌟 查不到数据时的“格式纠偏”
         if result_df.empty:
             cols = df.columns.tolist()
             sample_data = df.iloc[0].to_dict() if not df.empty else "无数据"
+
+            sys_logger.warning(
+                f"⚠️ 查询执行成功，但结果为空！\n这通常是因为你的 query_string (特别是时间格式) 与 CSV 的实际文本不匹配。\n请看一眼 CSV 真实的列名和第一条数据的格式，然后修改你的条件重试！\n-> 真实列名: {cols}\n-> 真实数据示例: {sample_data}")
+
             return (f"⚠️ 查询执行成功，但结果为空！\n"
                     f"这通常是因为你的 query_string (特别是时间格式) 与 CSV 的实际文本不匹配。\n"
                     f"请看一眼 CSV 真实的列名和第一条数据的格式，然后修改你的条件重试！\n"
@@ -130,12 +147,14 @@ def query_csv(file_path: str, query_string: str) -> str:
 
         # 3. 正常返回 JSON 字符串
         json_result = str(result_df.to_json(orient="records", force_ascii=False))
+        sys_logger.info(f"[工具执行] CSV查询成功，返回了 {len(result_df)} 条数据。")
         return json_result
 
     except Exception as e:
         # 🌟 核心升级 2：语法报错时的“列名纠偏”
         cols = df.columns.tolist() if 'df' in locals() else "未知"
-        return (f"查询语法报错！错误信息: {str(e)}\n"
+        sys_logger.error(f"查询语法报错！错误信息: {str(e)}\n")
+        return (f"查询语法报错！错误信息: {str(e)}\n这通常是因为你使用了不存在的列名（比如用了中文'时间'，但实际是'time'）。\n请使用真实的列名重新查询: {cols}"
                 f"这通常是因为你使用了不存在的列名（比如用了中文'时间'，但实际是'time'）。\n"
                 f"请使用真实的列名重新查询: {cols}")
 
@@ -162,12 +181,16 @@ def submit_sensor_record(
     - has_risk: 是否有风险 (bool)
     - action_advice: 系统就绪状态或针对风险给出的具体处置建议
     """
-    print(f"\n[报告接收中心] 成功捕获到大模型提交的结构化数据：")
-    print(f"   - 时间: {target_time}")
-    print(f"   - 空气温湿度: {air_temperature} ℃ | {air_humidity} %")
-    print(f"   - 壁面温度: {wall_temperature} ℃")
-    print(f"   - 风险判定: {'有风险' if has_risk else '安全'}")
-    print(f"   - 处置建议: {action_advice}\n")
+    log_msg = (
+        f"[报告接收中心] 成功捕获到大模型提交的结构化数据：\n"
+        f"   - 时间: {target_time}\n"
+        f"   - 空气温湿度: {air_temperature} ℃ | {air_humidity} %\n"
+        f"   - 壁面温度: {wall_temperature} ℃\n"
+        f"   - 风险判定: {'有风险' if has_risk else '安全'}\n"
+        f"   - 处置建议: {action_advice}"
+    )
+    # 一次性静默打入日志
+    sys_logger.info(log_msg)
 
     # 这里可以扩展业务逻辑，比如写入数据库、保存到本地 JSON 文件等
     # 目前直接返回一个确认信息给大模型
@@ -202,12 +225,16 @@ def read_docx_file(file_path: str) -> str:
                     full_text.append(" [表格数据] " + " | ".join(row_text))
 
         if not full_text:
+            sys_logger.warning(f"⚠️ 读取了 {file_path}，但未发现有效内容。")
             return "⚠️ 读取成功，但未在文档中发现有效的文本内容。"
 
         # 把所有文本用换行符连起来，变成大模型能读懂的长文章
-        return "\n".join(full_text)
+        result_txt = "\n".join(full_text)
+        sys_logger.info(f"[工具执行] 成功读取 DOCX 文件: {file_path} (解析出 {len(result_txt)} 字符)")
+        return result_txt
 
     except Exception as e:
+        sys_logger.error(f"读取 .docx 文件失败，原因: {str(e)}")
         return f"读取 .docx 文件失败，原因: {str(e)}"
 
 
@@ -239,9 +266,10 @@ def submit_paper_section(section_name: str, content: str) -> str:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(summary_data, f, ensure_ascii=False, indent=4)
 
-        print(f"已安全接收并持久化章节: {section_name}")
+        sys_logger.info(f"[报告接收中心] 已安全接收并持久化章节: {section_name}")
         return f" {section_name} 章节已保存。请继续调用此工具提交下一个章节，直到 7 个章节全部提交完毕！"
     except Exception as e:
+        sys_logger.error(f"写入 {section_name} 时发生本地错误: {str(e)}")
         return f"写入 {section_name} 时发生本地错误: {str(e)}"
 
 
@@ -257,17 +285,30 @@ def update_task_notes(current_action: str, checklist_status: str, next_step: str
     - checklist_status: 当前完整的任务清单及各项的完成状态（如：[x] 提取摘要, [ ] 提取引言）。
     - next_step: 你的下一步行动计划是什么？
     """
-    print(f"\n[Agent 内部思考] {current_action}")
-    print(f"   进度: {checklist_status.replace(']', '] ').replace('\n', ' | ')}")
-    print(f"   规划: {next_step}")
+    checklist_view = checklist_status.replace(']', '] ').replace('\n', ' | ')
+    log_msg = (
+        f"[Agent 内部思考/便签本更新] \n"
+        f"   动作: {current_action}\n"
+        f"   进度: {checklist_view}\n"
+        f"   规划: {next_step}"
+    )
+    sys_logger.info(log_msg)
 
     return "笔记已更新。请严格根据 next_step 继续执行下一个工具调用，在所有任务打钩前，绝对保持静默！"
 
 
 # 使用示例
 if __name__ == "__main__":
+    print_and_log("\n" + "=" * 50, "info")
+    print_and_log("🚀 启动工具箱本地测试...", "info")
+
     folder = "./test/1"  # 替换为你的文件夹路径
     names = get_file_names(folder)
+    print_and_log(f"获取到的文件名列表: {names}", "info")
+
     # rename_file("C:/temp/old.txt", "new.txt")
-    print(names)
-    print(get_host_info())
+
+    host_info = get_host_info()
+    print_and_log(f"主机信息: \n{host_info}", "info")
+
+    print_and_log("=" * 50 + "\n", "info")

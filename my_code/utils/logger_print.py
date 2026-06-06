@@ -43,7 +43,20 @@ def setup_logger():
 
     return logger
 
-
 # 实例化并暴露给其他文件使用
 sys_logger = setup_logger()
+
+
+def print_and_log(message: str, level: str = "info", **kwargs):
+    """
+    把消息同时打在屏幕上并写入日志。
+    如果 level='error'，Loguru 会自动将它同时写入 system.log 和 error.log。
+    """
+    print(message, **kwargs)
+    if level == "info":
+        sys_logger.info(message)
+    elif level == "warning":
+        sys_logger.warning(message)
+    elif level == "error":
+        sys_logger.error(message)
 

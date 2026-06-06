@@ -23,6 +23,7 @@ from agent.agent_engine import UniversalPlanExecuteEngine
 from agent.llm_factory import get_llm_model
 from utils.utils import load_prompt
 from RAG.document_parser import read_any_file
+from utils.logger_print import sys_logger
 
 
 # ==========================================
@@ -31,8 +32,8 @@ from RAG.document_parser import read_any_file
 def make_mcp_tool(session: ClientSession):
     """闭包工厂：接收一个 session，返回一个绑定好的工具调用网关"""
     async def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
-        print(f"\n[ 远程调用] 正在请求 Server 执行: {tool_name}")
-        print(f"   传入参数: {arguments}")
+        sys_logger.info(f"[远程调用] 正在请求 Server 执行工具: {tool_name} | 传入参数: {arguments}")
+
         try:
             result = await session.call_tool(tool_name, arguments)
             text_result = [content.text for content in result.content if content.type == "text"]
@@ -40,7 +41,7 @@ def make_mcp_tool(session: ClientSession):
 
             # 2. 打印工具的返回结果（如果超过 300 字就截断显示，防止刷屏）
             preview = final_result if len(final_result) < 300 else final_result[:300] + "\n... (内容太长，已省略后续输出)"
-            print(f"[ Server 返回]\n{preview}\n")
+            sys_logger.info(f"[Server 返回]\n{preview}")
 
             return final_result
         except Exception as e:
@@ -48,22 +49,20 @@ def make_mcp_tool(session: ClientSession):
 
             # 🌟 诊断 1：拦截 JSON 400 报错，强迫模型重新生成！
             if "invalid_parameter" in error_msg or "json" in error_msg or "400" in error_msg:
-                print(f"⚠️ [格式修复] 检测到大模型生成的 JSON 存在语法错误，正在勒令其重写...")
-                # 抛出 ModelRetry，框架会自动扣减 retries 额度并让模型再试一次
+                sys_logger.warning(f"[格式修复] 检测到大模型生成的 JSON 存在语法错误，已勒令其消耗额度重写...")
                 raise ModelRetry(
-                    "系统检测到你刚才发送的工具参数存在 JSON 格式错误（可能包含了未转义的引号或换行）。请严格去除所有回车和双引号，重新调用本工具！")
+                    "系统检测到刚才发送的工具参数存在 JSON 格式错误（可能包含了未转义的引号或换行）。请严格去除所有回车和双引号，重新调用本工具！")
 
             # 🌟 诊断 2：如果是通讯/网络/超时问题 (可以根据实际的报错关键字调整)
             if "timeout" in error_msg or "connection" in error_msg or "network" in error_msg or "mcp" in error_msg:
-                print(f"⚠️ [网络波动] 检测到通讯异常: {e}")
-                print(f" 正在扣减重试额度并请求大模型重试...")
+                sys_logger.warning(f"[网络波动] 检测到通讯异常: {e}。正在扣减重试额度并请求大模型重试...")
                 # 抛出 ModelRetry
                 # Pydantic-AI 会拦截这个异常，自动消耗一次 retries 额度，并让模型重新发起调用
                 raise ModelRetry(f"由于网络通讯异常导致工具调用失败 ({e})。请重新尝试调用此工具。")
 
             # 🌟 诊断 3：如果是代码逻辑/GBK编码等致命死错
             else:
-                print(f" [致命错误] {e}")
+                sys_logger.error(f"[致命错误] 工具执行崩溃: {e}")
                 # 核心拦截：直接返回普通字符串作为结果
                 # 大模型看到这句话后，就知道工具废了，不会再执着重试，而是直接回复用户
                 return f" 致命系统错误: {str(e)}。请立即放弃重试此工具，并直接向用户汇报系统故障！"
@@ -100,7 +99,7 @@ class UniversalEngineTool:
         一旦你判断用户的任务需要调用此引擎，请【立即、马上】发起 Tool Call！
         绝对禁止向用户回复“好的”、“请稍等”、“我正在为您提取”等任何过渡性寒暄废话！只要你开口说普通文本，系统就会崩溃！
         """
-        print(f"\n [主控中枢] 收到万能调度请求，正在组装上下文并移交 Universal 引擎...")
+        sys_logger.info(f"[主控中枢] 收到万能调度请求，正在组装上下文并移交 Universal 引擎...")
 
         # 1. 泛化多文件读取引擎
         context_text = ""
@@ -122,8 +121,11 @@ class UniversalEngineTool:
             os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
             with open(save_to, "w", encoding="utf-8") as f:
                 json.dump(results, f, ensure_ascii=False, indent=4)
+            sys_logger.info(f"[引擎落盘] 复杂流水线结果已持久化到: {save_to}")
         except Exception as e:
-            return f" 流水线执行成功，但保存到 {save_to} 时失败: {e}"
+            msg = f"[引擎落盘失败] 无法保存到 {save_to}: {e}"
+            sys_logger.error(msg)
+            return msg
 
         return f" 复杂流水线已在后台成功执行！共完成 {len(results)} 个步骤，详细结果已持久化到 {save_to}。请向用户汇报成功摘要。"
 
@@ -139,7 +141,10 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
     # 1. 获取工具列表
     tools_response = await session.list_tools()
     mcp_tools = tools_response.tools
-    print(f"📦 发现 {len(mcp_tools)} 个远程工具: {[t.name for t in mcp_tools]}")
+
+    # 🌟 系统启动时的工具扫描日志
+    tool_names = [t.name for t in mcp_tools]
+    sys_logger.info(f"📦 [Agent组装] 成功从 Server 发现 {len(mcp_tools)} 个远程工具: {tool_names}")
 
     # 2. 编写工具说明书 (系统提示词)
     tools_instruction = "你现在连接到了一个本地工具库，可以使用以下工具：\n\n"
@@ -161,6 +166,8 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
     # 实例化 OOP 版本的万能引擎，并将其方法提取为 Tool
     engine_instance = UniversalEngineTool(model_name)
     heavy_engine_tool = Tool(engine_instance.run_engine)
+
+    sys_logger.info(f"🚀 [Agent组装完毕] 引擎挂载成功，即将进入对话循环。")
 
     # 4. 组装并返回 Agent
     return Agent(

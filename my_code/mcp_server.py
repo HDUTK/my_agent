@@ -16,6 +16,7 @@ import inspect
 from core_tools import tools
 
 from RAG.local_RAG import LocalKnowledgeExpert
+from utils.logger_print import sys_logger
 
 
 # 🌟 屏蔽底层库的 INFO 级别刷屏日志，只放行 WARNING 和 ERROR
@@ -58,20 +59,21 @@ def consult_local_knowledge_expert(query: str) -> str:
     """
     # 💡 在 MCP 的 stdio 模式下，尽量使用 logging.warning 输出日志，
     # 直接使用 print 有概率会污染底层的 JSON 通信管道导致通信失败。
-    logging.warning(f" [MCP Tool 触发] 正在向后台老专家提问: {query}")
+    sys_logger.info(f" [MCP Tool 触发] 正在向后台老专家提问: {query}")
 
     # 拿到的是纯原始文本！
     raw_docs_text = expert_instance.retrieve_docs(query, threshold=0.35)
 
-    logging.warning(" [MCP Tool 完毕] 本地知识库已给出详细解答。")
+    sys_logger.info(" [MCP Tool 完毕] 本地知识库已给出详细解答。")
     return raw_docs_text
 
 # 2. 自动扫描并注册 tools.py 中的所有公开函数
 for name, func in inspect.getmembers(tools, inspect.isfunction):
     if not name.startswith("_"):
         mcp.add_tool(func)
-        # print(f" 工具已挂载: {name}") # 在实际 stdio 运行中，最好不要用 print，会污染通信通道
+        sys_logger.info(f"✅ 工具已成功挂载: {name}")
 
 if __name__ == "__main__":
+    sys_logger.info("🚀 FastMCP Server 启动，正通过 stdio 监听通信通道...")
     # 3. 启动标准 stdio 服务
     mcp.run()

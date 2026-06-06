@@ -31,7 +31,7 @@ from mcp.client.session import ClientSession
 # 导入其他的模块
 from utils.utils import trim_history
 from agent.agent_builder import build_agent_with_mcp
-
+from utils.logger_print import sys_logger, print_and_log
 # 配置
 from config.system_config import my_model_name, my_scenario_name
 
@@ -44,14 +44,15 @@ load_dotenv()
 # ==========================================
 async def run_chat_loop(agent: Agent):
     """控制台聊天引擎：只负责跟用户互动"""
-    print("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。")
+    print_and_log("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。", "info")
     history = []
 
     while True:
         user_input = await asyncio.to_thread(input, "\n输入：")
 
         if user_input.strip().lower() == 'exit':
-            print("👋 Agent 已退出。")
+            print_and_log("👋 Agent 已退出。", "info")
+
             break
 
         if not user_input.strip():
@@ -61,7 +62,7 @@ async def run_chat_loop(agent: Agent):
         history = trim_history(history, max_messages=6)
 
         # print(f"🧹 (当前记忆长度: {len(history)} 条)")
-        print("🤖 思考中...\n回答: ", end="", flush=True)
+        print_and_log("🤖 思考中...\n回答: ", "info", end="", flush=True)
 
         try:
             # 🌟 把 run() 换成 run_stream()，用 async with 打开“水龙头”
@@ -72,21 +73,31 @@ async def run_chat_loop(agent: Agent):
                     model_settings=ModelSettings(max_tokens=3000)  # 限制大模型最多生成 800 个 Token (防废话，防破产)
             ) as resp:
 
+                content_chunks = []
+
                 async for text_chunk in resp.stream_text(delta=True):
                     print(text_chunk, end="", flush=True)
+                    content_chunks.append(text_chunk)
                 print()  # 打印换行收尾
 
                 # 🌟 必须等文字全部流完，再结算并打印聊天 Token 消耗
+                full_reply = "".join(content_chunks)
+                sys_logger.info(f"[对话记录] 用户输入: {user_input}\n[Agent完整回复]: \n{full_reply}")
+
                 usage = resp.usage
-                print(
-                    f"\n📊 [Token结算 - 聊天界面] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}")
+                token_msg = f"📊 [Token结算 - 聊天界面] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}"
+                print_and_log(f"\n{token_msg}", "info")
 
                 # 🌟 在水流完之后，更新聊天记录
                 history = resp.all_messages()
 
             print("-" * 50)
         except Exception as e:
-            print(f"\n 抱歉，大模型处理或工具调用时遇到错误：\n{e}")
+            # 报错写入日志，但屏幕上也要给用户一个温柔的提示
+            sys_logger.error(f"大模型处理或工具调用时遇到错误：\n{e}")
+            sys_logger.error("-" * 50)
+
+            print(f"\n🚨 抱歉，大模型处理或工具调用时遇到错误，后台已自动捕获并记录。")
             print(" 程序仍在运行，您可以尝试重新提问，或等待网络恢复。")
             print("-" * 50)
 
@@ -95,7 +106,7 @@ async def run_chat_loop(agent: Agent):
 # Main 函数
 # ==========================================
 async def main(model_name: str , scenario_name: str ):
-    print(f"🔄 系统启动中... [当前指定模型: {model_name}]")
+    sys_logger.info(f"系统启动中... [当前指定模型: {model_name}]")
 
     # 第一步：定义后厨位置——启动连接（对接 MCP Server）
     server_parameters = StdioServerParameters(command="python", args=["mcp_server.py"])
@@ -104,7 +115,7 @@ async def main(model_name: str , scenario_name: str ):
     async with stdio_client(server_parameters) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            print("✅ 成功连接到 MCP Server！")
+            sys_logger.info("✅ 成功连接到 MCP Server！")
 
             # 第三步：把 session 交给装配厂，换回一个组装好的 Agent
             agent = await build_agent_with_mcp(session, model_name, scenario_name)

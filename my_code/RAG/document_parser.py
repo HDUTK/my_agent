@@ -11,8 +11,11 @@ Target Python:  3.14 -> 3.12
 """
 
 import os
+
 from utils.utils import apply_model_environment
+from utils.logger_print import sys_logger, print_and_log
 from config.agent_config import PDF_PARSER_TIMEOUT
+
 
 # 注入针对 Marker PDF 视觉模型的环境配置（锁定 HuggingFace 缓存与网络断路器）
 apply_model_environment("marker_pdf")
@@ -58,7 +61,7 @@ def parse_pdf(file_path: str) -> str:
             shutil.rmtree(output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        print(
+        sys_logger.info(
             f"\n👁 [视觉解析启动] 正在后台启动 Marker 分析文档: {base_name}.pdf ... (若是首次运行将自动下载模型权重，请耐心等待)")
 
         # 2. 构建最新版 1.x 的极简命令行指令
@@ -81,7 +84,9 @@ def parse_pdf(file_path: str) -> str:
         )
 
         if result.returncode != 0:
-            return f"[Marker解析失败]: 子进程报错\n{result.stderr}"
+            msg = f"[Marker解析失败]: 子进程报错\n{result.stderr}"
+            sys_logger.error(msg)
+            return msg
 
         # 4. 🌟 兼容新版的超强容错寻找法：去输出目录里遍历寻找那份黄金 Markdown 文件
         expected_md_file = None
@@ -94,20 +99,28 @@ def parse_pdf(file_path: str) -> str:
                 break
 
         if not expected_md_file or not os.path.exists(expected_md_file):
-            return f"[Marker解析异常]: 未能在预期路径找到输出的 Markdown 文件\n调试信息:\n{result.stdout}"
+            msg = f"[Marker解析异常]: 未能在预期路径找到输出的 Markdown 文件\n调试信息:\n{result.stdout}"
+            sys_logger.error(msg)
+            return msg
 
         with open(expected_md_file, "r", encoding="utf-8") as f:
             md_content = f.read()
 
-        print(f" [解析成功] 获得纯净 Markdown，文本长度: {len(md_content)} 字符")
+        sys_logger.info(f"✅ [解析成功] 获得纯净 Markdown，文本长度: {len(md_content)} 字符")
         return md_content
 
     except subprocess.TimeoutExpired:
-        return f"[Marker解析超时]: 解析文件 {file_path} 花费了太长时间。"
+        msg = f"[Marker解析超时]: 解析文件 {file_path} 花费了太长时间。"
+        sys_logger.error(msg)
+        return msg
     except FileNotFoundError:
-        return "⚠️ 未找到 marker_single 命令。请确认环境激活，或检查 pip install marker-pdf 是否成功。"
+        msg = "⚠️ 未找到 marker_single 命令。请确认环境激活，或检查 pip install marker-pdf 是否成功。"
+        sys_logger.error(msg)
+        return msg
     except Exception as e:
-        return f"[视觉PDF解析错误]: {str(e)}"
+        msg = f"[视觉PDF解析错误]: {str(e)}"
+        sys_logger.error(msg)
+        return msg
 
 
 def parse_docx(file_path: str) -> str:
@@ -128,9 +141,13 @@ def parse_docx(file_path: str) -> str:
                 if row_text:
                     full_text.append(" | ".join(row_text))
 
-        return "\n".join(full_text)
+        msg = "\n".join(full_text)
+        sys_logger.info(f"✅ [解析成功] 获得纯净 docs，文本长度: {len(msg)} 字符")
+        return msg
     except Exception as e:
-        return f"[DOCX解析错误]: {str(e)}"
+        msg = f"[DOCX解析错误]: {str(e)}"
+        sys_logger.error(msg)
+        return msg
 
 
 def parse_spreadsheet(file_path: str, ext: str) -> str:
@@ -141,9 +158,13 @@ def parse_spreadsheet(file_path: str, ext: str) -> str:
             df = pd.read_csv(file_path)  # type: ignore
 
             if not isinstance(df, pd.DataFrame):
-                return "[表格解析错误]: 读取的文件内容为空或格式异常"
+                msg = "[表格解析错误]: 读取的文件内容为空或格式异常"
+                sys_logger.error(msg)
+                return msg
 
-            return df.to_markdown(index=False)
+            result_md = df.to_markdown(index=False)
+            sys_logger.info(f"✅ [解析成功] 获得纯净 CSV，文本长度: {len(result_md)} 字符")
+            return result_md
 
         else:  # .xlsx 或 .xls
             # 🌟 sheet_name=None 会一次性读取所有 Sheet
@@ -164,26 +185,38 @@ def parse_spreadsheet(file_path: str, ext: str) -> str:
                 markdown_results.append("\n")  # 加上空行，视觉分割更清晰
 
             if not markdown_results:
-                return "[表格解析错误]: Excel 文件中没有有效数据"
+                msg = "[表格解析错误]: Excel 文件中没有有效数据"
+                sys_logger.error(msg)
+                return msg
 
             # 把所有 Sheet 的 Markdown 拼成一个超长字符串
-            return "\n".join(markdown_results)
+            msg = "\n".join(markdown_results)
+            sys_logger.info(f" [解析成功] 获得纯净 表格，文本长度: {len(msg)} 字符")
+            return msg
 
     except Exception as e:
-        return f"[表格解析错误]: {str(e)}"
+        msg = f"[表格解析错误]: {str(e)}"
+        sys_logger.error(msg)
+        return msg
 
 
 def parse_plain_text(file_path: str) -> str:
     """解析纯文本文件"""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
+            msg = f.read()
+            sys_logger.info(f"✅ [解析成功] 获得纯净 TXT/MD (UTF-8)，文本长度: {len(msg)} 字符")
+            return msg
     except UnicodeDecodeError:
         # 如果 utf-8 失败，尝试 gbk (处理一些早期的中文 txt)
         with open(file_path, "r", encoding="gbk") as f:
-            return f.read()
+            msg = f.read()
+            sys_logger.info(f"✅ [解析成功] 获得纯净 txt，文本长度: {len(msg)} 字符")
+            return msg
     except Exception as e:
-        return f"[纯文本解析错误]: {str(e)}"
+        msg = f"[纯文本解析错误]: {str(e)}"
+        sys_logger.error(msg)
+        return msg
 
 
 def parse_json(file_path: str) -> str:
@@ -195,20 +228,31 @@ def parse_json(file_path: str) -> str:
         # 🌟 核心细节：
         # indent=2 保证输出有漂亮的缩进，大模型特别吃这一套
         # ensure_ascii=False 极其关键，否则里面的中文会变成 \u4e2d 这种机器码，大模型容易糊涂
-        return json.dumps(data, ensure_ascii=False, indent=2)
+        msg = json.dumps(data, ensure_ascii=False, indent=2)
+        sys_logger.info(f"✅ [解析成功] 获得纯净 json，文本长度: {len(msg)} 字符")
+        return msg
 
     except json.JSONDecodeError as e:
-        return f"[JSON解析错误]: 文件格式损坏或不规范 - {str(e)}"
+        msg = f"[JSON解析错误]: 文件格式损坏或不规范 - {str(e)}"
+        sys_logger.error(msg)
+        return msg
     except Exception as e:
-        return f"[JSON读取错误]: {str(e)}"
+        msg = f"[JSON读取错误]: {str(e)}"
+        sys_logger.error(msg)
+        return msg
 
 
 def read_any_file(file_path: str) -> str:
     """
     🌟 统一对外接口：传入任意支持的文件路径，自动路由到对应的解析器，返回纯文本
     """
+
+    sys_logger.info(f"📂 [文档解析器] 接收到读取任务，目标文件: {file_path}")
+
     if not os.path.exists(file_path):
-        return f"⚠️ 文件不存在: {file_path}"
+        msg = f"⚠️ 文件不存在: {file_path}"
+        sys_logger.error(msg)
+        return msg
 
     # 获取文件后缀名并转为小写 (例如: '.pdf')
     ext = os.path.splitext(file_path)[1].lower()
@@ -223,7 +267,9 @@ def read_any_file(file_path: str) -> str:
         return parse_docx(file_path)
 
     elif ext == '.doc':
-        return "⚠️ 警告：暂不支持解析古老的 .doc 格式，请用 Word 将其另存为 .docx 后重试。"
+        msg = "⚠️ 警告：暂不支持解析古老的 .doc 格式，请用 Word 将其另存为 .docx 后重试。"
+        sys_logger.warning(msg)
+        return msg
 
     elif ext in ['.csv', '.xlsx', '.xls']:
         return parse_spreadsheet(file_path, ext)
@@ -232,12 +278,24 @@ def read_any_file(file_path: str) -> str:
         return parse_json(file_path)
 
     else:
-        return f"⚠️ 暂不支持解析此类型的文件: {ext}"
+        msg = f"⚠️ 暂不支持解析此类型的文件: {ext}"
+        sys_logger.warning(msg)
+        return msg
 
 
 # 测试代码 (当直接运行此文件时执行)
 if __name__ == "__main__":
-    # 可以随便丢一个 pdf 或 xlsx 进去测试一下提取效果
-    print(read_any_file("../test/2/parser_test/博士在读成绩单.pdf"))
+    # 测试环境中使用 print_and_log，可以直观看到提取情况并留底
+    print_and_log("\n" + "=" * 50, "info")
+    print_and_log("🚀 启动文档解析器本地测试...", "info")
+
+    test_path = "../test/2/parser_test/博士在读成绩单.pdf"
+    result = read_any_file(test_path)
+
+    print_and_log("\n" + "-" * 20 + " 提取内容预览 " + "-" * 20, "info")
+    # 只打印前 500 个字符防刷屏
+    preview = result[:500] + "\n...[内容已折叠]" if len(result) > 500 else result
+    print_and_log(preview, "info")
+    print_and_log("=" * 50 + "\n", "info")
     pass
 

@@ -15,9 +15,11 @@ Target Python: 3.12
 import os
 import hashlib
 
-from config.system_config import HF_MODELS_PATH, DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
+from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
 from config.agent_config import MODEL_REGISTRY
 from utils.utils import apply_model_environment
+from utils.logger_print import sys_logger, print_and_log
+
 
 # 读取bge_m3模型的配置
 apply_model_environment("bge_m3")
@@ -49,7 +51,7 @@ def get_bge_embeddings():
     🌟 加载智源最新一代 BGE-M3 多语言/长文本向量模型 (纯本地运行)
     首次运行会自动去镜像源下载约 2.2GB 的模型权重，之后永久本地秒加载。
     """
-    print(" 正在加载 BGE-M3 顶级向量模型引擎...")
+    print_and_log(" 正在加载 BGE-M3 顶级向量模型引擎...", "info")
 
     # 🌟 模型名称 bge-m3
     model_name = MODEL_REGISTRY['bge_m3']['model_name']
@@ -65,7 +67,7 @@ def get_bge_embeddings():
         model_kwargs=model_kwargs,
         encode_kwargs=encode_kwargs
     )
-    print(" BGE-M3 模型加载完毕！")
+    print_and_log(" BGE-M3 模型加载完毕！", "info")
     return embeddings
 
 
@@ -74,15 +76,15 @@ def save_chunks_to_chroma(chunks: list[Document]):
     将切分好的纸条 (Chunks) 连同它们的标签 (Metadata) 一起变成坐标，存入指定路径的 ChromaDB
     """
     if not chunks:
-        print("⚠️ 传入的 Chunks 为空，无法入库。")
+        print_and_log("⚠️ 传入的 Chunks 为空，无法入库。", "warning")
         return None
 
-    print(f"📦 准备将 {len(chunks)} 个 Chunk 进行向量化并存入 ChromaDB...")
-    print(f"📁 目标存储路径: {DB_PERSIST_PATH}")
+    print_and_log(f"📦 准备将 {len(chunks)} 个 Chunk 进行向量化并存入 ChromaDB...", "info")
+    print_and_log(f"📁 目标存储路径: {DB_PERSIST_PATH}", "info")
 
     # 🌟 批量为所有纸条生成固定的数字指纹 ID
     chunk_ids = [generate_chunk_id(chunk) for chunk in chunks]
-    print(f"🔑 已生成固定唯一哈希 ID，启动防重复入库 (Upsert 机制)...")
+    print_and_log(f"🔑 已生成固定唯一哈希 ID，启动防重复入库 (Upsert 机制)...", "info")
 
     # 1. 唤醒模型
     embeddings = get_bge_embeddings()
@@ -99,7 +101,7 @@ def save_chunks_to_chroma(chunks: list[Document]):
         collection_name=COLLECTION_NAME
     )
 
-    print("🎉 恭喜！所有数据已成功向量化并持久化入库！")
+    print_and_log("🎉 恭喜！所有数据已成功向量化并持久化入库！", "info")
     return vector_db
 
 
@@ -108,7 +110,7 @@ def query_chroma_db(query_text: str, top_k: int = 3):
     测试检索功能：输入问题，寻找最相似的纸条
     ⭐️ 单元测试时使用
     """
-    print(f"\n🔍 正在检索问题: '{query_text}'")
+    print_and_log(f"\n🔍 正在检索问题: '{query_text}'", "info")
 
     # 唤醒模型（把问题也变成坐标）
     embeddings = get_bge_embeddings()
@@ -133,9 +135,9 @@ if __name__ == "__main__":
     # 🎯 找一个本地真实的测试文件（挑一个内容丰富的，比如 JSON 或 Excel）
     test_file_path = r"D:/PythonProject/AI_Agent/my_code/test/2/Manuscript.docx"
 
-    print("\n" + "=" * 60)
-    print("🚀 RAG 全链路启动：解析 -> 切分 -> 向量入库")
-    print("=" * 60)
+    print_and_log("\n" + "=" * 60)
+    print_and_log("🚀 RAG 全链路启动：解析 -> 切分 -> 向量入库")
+    print_and_log("=" * 60)
 
     # 1. 解析
     raw_text = read_any_file(test_file_path)
@@ -152,6 +154,6 @@ if __name__ == "__main__":
 
         print("\n🏆 检索结果展示：")
         for i, (doc, score) in enumerate(search_results):
-            print(f"\n【Top {i + 1}】(相似度分数: {score:.4f})")
-            print(f"🏷️ 标签: {doc.metadata}")
-            print(f"📝 内容:\n{doc.page_content}")
+            print_and_log(f"\n【Top {i + 1}】(相似度分数: {score:.4f})")
+            print_and_log(f"🏷️ 标签: {doc.metadata}")
+            print_and_log(f"📝 内容:\n{doc.page_content}")

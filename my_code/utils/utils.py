@@ -16,8 +16,8 @@ import warnings
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart
 from config.system_config import PROMPTS_DIR
 
-from config.system_config import HF_MODELS_PATH
 from config.agent_config import MODEL_REGISTRY
+from logger_print import sys_logger, print_and_log
 
 
 # ==========================================
@@ -28,9 +28,12 @@ def load_prompt(scenario_name: str) -> str:
     file_path = PROMPTS_DIR + f"/{scenario_name}.md"
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+            sys_logger.info(f"[Prompt 加载] 成功读取系统提示词模板: {scenario_name}.md")
+            return content
     except FileNotFoundError:
-        return "你是一个有用的人工智能助手。" # 找不到文件时的默认兜底
+        sys_logger.warning(f"[Prompt 缺失] 找不到文件 {file_path}，已强制降级使用默认兜底提示词！")
+        return "你是一个有用的人工智能助手。"  # 找不到文件时的默认兜底
 
 
 # ==========================================
@@ -87,6 +90,7 @@ def apply_model_environment(model_key: str):
 
     config = MODEL_REGISTRY.get(model_key)
     if not config:
+        sys_logger.error(f" 未在 MODEL_REGISTRY 中找到模型配置: {model_key}")
         raise ValueError(f" 未在 MODEL_REGISTRY 中找到模型配置: {model_key}")
 
     # 配置当前模型专属的本地缓存路径
@@ -117,5 +121,5 @@ def apply_model_environment(model_key: str):
             if "HF_ENDPOINT" in os.environ:
                 del os.environ["HF_ENDPOINT"]
 
-    print(
+    sys_logger.info(
         f"⚙ [环境配置] 已成功为模型 [{model_key}] 注入网络与路径环境变（离线={config['offline']}, 镜像={config['use_mirror']})")
