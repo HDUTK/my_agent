@@ -14,6 +14,7 @@ Target Python: 3.12
 
 import os
 import hashlib
+import shutil
 
 from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
 from config.agent_config import MODEL_REGISTRY
@@ -27,6 +28,26 @@ apply_model_environment(MODEL_REGISTRY['bge_m3']['model_name_simple'])
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+
+
+def clear_vector_database():
+    """
+    🌟 物理级清空本地向量数据库
+    """
+    print_and_log("\n" + "⚠️" * 20, "warning")
+    print_and_log(" 收到清空指令，正在准备销毁历史向量数据库...", "warning")
+
+    if os.path.exists(DB_PERSIST_PATH):
+        try:
+            # 采用 rmtree 进行最彻底的物理销毁
+            shutil.rmtree(DB_PERSIST_PATH)
+            print_and_log(f"🗑️ 已成功彻底删除历史数据库文件夹: {DB_PERSIST_PATH}", "info")
+        except Exception as e:
+            print_and_log(f"❌ 删除历史数据库失败 (请确认没有其他程序正在占用该文件夹): {e}", "error")
+    else:
+        print_and_log("ℹ️ 历史数据库不存在，无需清理，直接开始全新构建。", "info")
+
+    print_and_log("⚠️" * 20 + "\n", "warning")
 
 
 def generate_chunk_id(chunk: Document) -> str:

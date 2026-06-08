@@ -27,7 +27,8 @@ LLM_CONFIG = {
         },
         "qwen": {
             "model_name": "qwen",
-            "type": "qwen-plus"
+            # qwen-plus（已用82%）/qwen3.7-plus
+            "type": "qwen3.7-plus"
         },
         "zhipu": {
             "model_name": "zhipu",
