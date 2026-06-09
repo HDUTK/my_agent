@@ -43,23 +43,29 @@ def batch_build_knowledge_base(folder_path: str):
     if CLEAR_OLD_DB:
         clear_vector_database()
 
-    # 获取文件夹下的所有文件
-    all_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+    # 获取文件夹下的所有文件, 使用 os.walk 递归扫描所有子文件夹
+    all_file_paths = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            # 拼出文件的完整绝对路径并收集起来
+            all_file_paths.append(os.path.join(root, file))
 
-    if not all_files:
+    if not all_file_paths:
         print_and_log(f"⚠️ 文件夹 {folder_path} 是空的，没有需要入库的文件。", "warning")
         return
 
-    print_and_log(f"📦 共发现 {len(all_files)} 个待处理文件。开始执行流水线...\n", "info")
+    print_and_log(f"📦 共发现 {len(all_file_paths)} 个待处理文件。开始执行流水线...\n", "info")
 
     success_count = 0
     failed_count = 0
     total_chunks_saved = 0
 
     # 开始循环处理每一个文件
-    for idx, file_name in enumerate(all_files):
-        file_path = os.path.join(folder_path, file_name)
-        print_and_log(f"🔄 [{idx + 1}/{len(all_files)}] 正在处理: {file_name} ...", "info")
+    # 开始循环处理每一个文件
+    for idx, file_path in enumerate(all_file_paths):
+        # 从完整路径中提取出单纯的文件名，用来打日志
+        file_name = os.path.basename(file_path)
+        print_and_log(f"🔄 [{idx + 1}/{len(all_file_paths)}] 正在处理: {file_name} ...", "info")
 
         try:
             # 第一阶段：解析提取文本

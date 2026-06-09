@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-function description: 此文件用于RAG 第一阶段：文档解析统一工厂（支持 txt, md, pdf, docx, csv, xlsx, xls）
+function description: 此文件用于RAG 第一阶段：文档解析统一工厂
+（支持 txt, md, pdf, docx, csv, xlsx, xls, ppt）
 author: TangKan
 contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
@@ -11,6 +12,7 @@ Target Python:  3.14 -> 3.12
 """
 
 import os
+import pptx
 
 from utils.core_utils import apply_model_environment
 from utils.logger_print import sys_logger, print_and_log
@@ -241,6 +243,59 @@ def parse_json(file_path: str) -> str:
         sys_logger.error(msg)
         return msg
 
+def parse_pptx(file_path: str) -> str:
+    """
+    🌟 解析 PPTX 文件，提取文本、表格，以及极其重要的【演讲者备注】。
+    输出格式经过特殊优化，使用 '### 幻灯片第 X 页' 作为标题，完美适配后续的 Markdown 切分器！
+    """
+    try:
+        prs = pptx.Presentation(file_path)
+        full_text = []
+
+        for i, slide in enumerate(prs.slides):
+            # 🌟 核心技巧：伪装成 Markdown 标题，后续 Chunker 就能按页完美切分！
+            slide_text = [f"### 幻灯片第 {i + 1} 页"]
+
+            # 1. 提取形状中的文本 (文本框、标题等)
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        text = paragraph.text.strip()
+                        if text:
+                            slide_text.append(text)
+
+                # 2. 提取表格中的文本 (PPT里经常有数据对比表)
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        row_text = [cell.text_frame.text.strip().replace("\n", "") for cell in row.cells if cell.text_frame.text.strip()]
+                        if row_text:
+                            slide_text.append(" | ".join(row_text))
+
+            # 3. 🌟 提取演讲者备注 (Speaker Notes)
+            # 大量干货往往写在备注里，这对大模型理解 PPT 逻辑极其重要！
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+                notes_text = slide.notes_slide.notes_text_frame.text.strip()
+                if notes_text:
+                    slide_text.append(f"\n> [演讲者备注]: {notes_text}")
+
+            # 只有当这一页除了标题之外还有实际内容时，才把它加入总文本
+            if len(slide_text) > 1:
+                full_text.append("\n".join(slide_text))
+
+        if not full_text:
+            msg = "⚠️ 读取成功，但未在 PPTX 中发现有效的文本内容。"
+            sys_logger.warning(f"⚠️ 读取了 {file_path}，但内容为空。")
+            return msg
+
+        result_txt = "\n\n".join(full_text)
+        sys_logger.info(f"✅ [解析成功] 获得纯净 PPTX，提取了 {len(prs.slides)} 页，共 {len(result_txt)} 字符")
+        return result_txt
+
+    except Exception as e:
+        msg = f"[PPTX解析错误]: {str(e)}"
+        sys_logger.error(msg)
+        return msg
+
 
 def read_any_file(file_path: str) -> str:
     """
@@ -276,6 +331,16 @@ def read_any_file(file_path: str) -> str:
 
     elif ext == '.json':
         return parse_json(file_path)
+
+    # 🌟 支持 pptx
+    elif ext == '.pptx':
+        return parse_pptx(file_path)
+
+    # 🌟 拦截古老的 ppt 并给出友好的提示
+    elif ext == '.ppt':
+        msg = "⚠️ 警告：暂不支持解析古老的二进制 .ppt 格式。请在 PowerPoint 中将其另存为 .pptx 或导出为 .pdf 后重试。"
+        sys_logger.warning(msg)
+        return msg
 
     else:
         msg = f"⚠️ 暂不支持解析此类型的文件: {ext}"
