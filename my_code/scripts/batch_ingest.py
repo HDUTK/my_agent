@@ -27,7 +27,7 @@ from RAG.vector_builder import save_chunks_to_chroma, clear_vector_database
 TARGET_FOLDER = r"D:/PythonProject/AI_Agent/knowledge_source"  # 替换为实际存放文件的文件夹路径
 
 # 🌟 是否在入库前清空历史库？(True: 彻底重置 | False: 追加更新)
-CLEAR_OLD_DB = True
+CLEAR_OLD_DB = False
 
 
 def batch_build_knowledge_base(folder_path: str):

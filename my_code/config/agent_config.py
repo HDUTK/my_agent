@@ -81,7 +81,7 @@ CHUNK_CONFIG = {
 MODEL_REGISTRY = {
     "bge_m3": {
         "model_name": "BAAI/bge-m3",
-        "model_name_simple": "bge-m3",
+        "model_name_simple": "bge_m3",
         "device": "cuda",
         "offline": True,  # 🌟 是否开启终极离线模式
         "use_mirror": True,  # 🌟 是否使用国内镜像源（若 offline=True，此项自动失效）
@@ -91,7 +91,7 @@ MODEL_REGISTRY = {
     "BM25_search_number": 10,  # 关键词初筛时获取最形似的前 y 条结果
     "bge_reranker": {
         "model_name": "BAAI/bge-reranker-v2-m3",
-        "model_name_simple": "bge-reranker",
+        "model_name_simple": "bge_reranker",
         "device": "cuda",
         "offline": True,  # 🌟 比如重排模型想允许联网检查更新或首次下载
         "use_mirror": True,  # 🌟 联网时使用国内镜像（若 offline=True，此项自动失效）
@@ -99,6 +99,7 @@ MODEL_REGISTRY = {
     },
     "marker_pdf": {
         "model_name": "marker-pdf",  # 这里的名字仅作占位说明，底层命令还是 marker_single
+        "model_name_simple": "marker_pdf",
         "device": "cuda",
         "offline": True,  # 开启终极离线，防止 marker 偷偷连网下载
         "use_mirror": False,

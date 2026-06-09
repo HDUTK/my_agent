@@ -14,11 +14,11 @@ import os
 
 from utils.core_utils import apply_model_environment
 from utils.logger_print import sys_logger, print_and_log
-from config.agent_config import PDF_PARSER_TIMEOUT
+from config.agent_config import PDF_PARSER_TIMEOUT, MODEL_REGISTRY
 
 
 # 注入针对 Marker PDF 视觉模型的环境配置（锁定 HuggingFace 缓存与网络断路器）
-apply_model_environment("marker_pdf")
+apply_model_environment(MODEL_REGISTRY["marker_pdf"]["model_name_simple"])
 
 # 🌟 管住所有 Python 派生的子进程（强制无视 Windows 设定，使用 UTF-8）
 os.environ["PYTHONUTF8"] = "1"
