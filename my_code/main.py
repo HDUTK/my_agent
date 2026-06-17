@@ -53,8 +53,7 @@ async def run_chat_loop(agent: Agent):
         if user_input.strip().lower() == 'exit':
             print_and_log("👋 Agent 已退出。", "info")
             sys_logger.info("-" * 50)
-            sys_logger.info("-" * 50)
-            sys_logger.info("-" * 50)
+            sys_logger.info("\n" * 5)
             break
 
         if not user_input.strip():
