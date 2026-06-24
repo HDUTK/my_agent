@@ -12,6 +12,9 @@ Target Python:
 """
 
 from typing import Optional, TypedDict
+from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
+
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
@@ -25,20 +28,51 @@ from config.agent_config import PLANNER_MAX_TOKENS, EXECUTOR_MAX_TOKENS
 
 
 # ==========================================
-# 1. 泛化状态 (State) - 流水线上的包裹
+# 1. 泛化状态 (State) - 流水线上的包裹（TypedDict 版）
 # ==========================================
-class EngineState(TypedDict):
-    """
-    用 TypedDict 定义的全局便签本。
-    这就是在各个节点之间传来传去的“包裹”，所有节点只能修改里面的数据。
-    """
-    goal: str
-    context: str
-    steps: list[str]              # 规划师拆解出来的所有步骤
-    current_step_index: int       # 当前正在执行第几个步骤的索引 (相当于游标)
-    scratchpad: dict[str, str]    # 记录每个步骤结论的便签本
-    detailed_results: dict[str, str] # 最终返回的详细执行结果
-    max_tokens: int               # 动态传入的 Token 限制
+# class EngineState(TypedDict):
+#     """
+#     用 TypedDict 定义的全局便签本。
+#     这就是在各个节点之间传来传去的“包裹”，所有节点只能修改里面的数据。
+#     """
+#     goal: str
+#     context: str
+#     steps: list[str]              # 规划师拆解出来的所有步骤
+#     current_step_index: int       # 当前正在执行第几个步骤的索引 (相当于游标)
+#     scratchpad: dict[str, str]    # 记录每个步骤结论的便签本
+#     detailed_results: dict[str, str] # 最终返回的详细执行结果
+#     max_tokens: int               # 动态传入的 Token 限制
+
+
+# ==========================================
+# 1. 泛化状态 (State) - 流水线上的包裹 (Dataclass 版)
+# ==========================================
+# @dataclass
+# class EngineState:
+#     goal: str
+#     context: str
+#     max_tokens: int
+#
+#     # 使用 field 赋予默认值，这样初始化时就不用手动塞空列表和空字典了
+#     steps: list[str] = field(default_factory=list)
+#     current_step_index: int = 0
+#     scratchpad: dict[str, str] = field(default_factory=dict)
+#     detailed_results: dict[str, str] = field(default_factory=dict)
+
+
+# ==========================================
+# 1. 泛化状态 (State) - 流水线上的包裹 (Pydantic 版)
+# ==========================================
+class EngineState(BaseModel):
+    goal: str = Field(description="核心终极目标")
+    context: str = Field(default="", description="背景上下文文本")
+    max_tokens: int
+
+    # Pydantic 同样支持默认值工厂
+    steps: list[str] = Field(default_factory=list)
+    current_step_index: int = Field(default=0)
+    scratchpad: dict[str, str] = Field(default_factory=dict)
+    detailed_results: dict[str, str] = Field(default_factory=dict)
 
 
 class TaskPlan(BaseModel):
@@ -95,9 +129,15 @@ class UniversalPlanExecuteEngine:
     # -----------------------------------
     async def planner_node(self, state: EngineState):
         """节点 A：规划师。负责生成 steps 列表"""
-        goal = state["goal"]
-        context = state["context"]
-        steps = state["steps"]
+        # TypedDict
+        # goal = state["goal"]
+        # context = state["context"]
+        # steps = state["steps"]
+
+        # Dataclass/Pydantic
+        goal = state.goal
+        context = state.context
+        steps = state.steps
 
         if steps:
             sys_logger.info("检测到预设任务清单，跳过 AI 规划，直接采用预设步骤。")
@@ -122,19 +162,35 @@ class UniversalPlanExecuteEngine:
 
     async def executor_node(self, state: EngineState):
         """节点 B：单步执行者。它每次只处理 1 个步骤！"""
-        idx = state["current_step_index"]
-        steps = state["steps"]
+        # TypedDict
+        # idx = state["current_step_index"]
+        # steps = state["steps"]
+        # current_task = steps[idx]
+        # max_tokens = state["max_tokens"]
+
+        # Dataclass/Pydantic
+        idx = state.current_step_index
+        steps = state.steps
         current_task = steps[idx]
-        max_tokens = state["max_tokens"]
+        max_tokens = state.max_tokens
 
         print_and_log(f"\n⚙️ [执行节点 {idx + 1}/{len(steps)}] 正在处理: {current_task}...", "info")
 
-        scratchpad_view = "\n".join([f"- {k}: {v}" for k, v in state["scratchpad"].items()]) or "目前是第一步，暂无历史进度。"
+        # TypedDict
+        # scratchpad_view = "\n".join([f"- {k}: {v}" for k, v in state["scratchpad"].items()]) or "目前是第一步，暂无历史进度。"
+        # Dataclass/Pydantic
+        scratchpad_view = "\n".join([f"- {k}: {v}" for k, v in state.scratchpad.items()]) or "目前是第一步，暂无历史进度。"
 
         dynamic_prompt = (
-            f"你的全局终极目标是：{state['goal']}\n\n"
+            # TypedDict
+            # f"你的全局终极目标是：{state['goal']}\n\n"
+            # Dataclass/Pydantic
+            f"你的全局终极目标是：{state.goal}\n\n"
             f"【全局便签本 / 当前进度摘要】\n{scratchpad_view}\n\n"
-            f"【背景资料】\n{state['context']}\n\n"
+            # TypedDict
+            # f"【背景资料】\n{state['context']}\n\n"
+            # Dataclass/Pydantic
+            f"【背景资料】\n{state.context}\n\n"
             f"⚠️ 系统指令：请基于资料，立刻执行当前任务：【{current_task}】。\n"
             f"直接输出执行结果的纯文本大白话，绝对禁止使用 JSON 或任何排版代码块。"
         )
@@ -156,10 +212,16 @@ class UniversalPlanExecuteEngine:
         sys_logger.info(f"[执行节点 {idx + 1} 完整回复]\n{content}")
 
         # 🌟 获取旧的数据字典，然后进行拷贝修改
-        new_detailed_results = state["detailed_results"].copy()
+        # TypedDict
+        # new_detailed_results = state["detailed_results"].copy()
+        # Dataclass/Pydantic
+        new_detailed_results = state.detailed_results.copy()
         new_detailed_results[current_task] = content
 
-        new_scratchpad = state["scratchpad"].copy()
+        # TypedDict
+        # new_scratchpad = state["scratchpad"].copy()
+        # Dataclass/Pydantic
+        new_scratchpad = state.scratchpad.copy()
         snippet = content[:100].replace("\n", "") + "..."
         new_scratchpad[current_task] = f"[✅ 完成] 摘要: {snippet}"
 
@@ -177,7 +239,10 @@ class UniversalPlanExecuteEngine:
     def should_continue(self, state: EngineState) -> str:
         """分拣道岔：判断是循环回 executor 还是结束"""
         # 如果游标还没走到列表尽头，说明还有任务没做完
-        if state["current_step_index"] < len(state["steps"]):
+        # TypedDict
+        # if state["current_step_index"] < len(state["steps"]):
+        # Dataclass/Pydantic
+        if state.current_step_index < len(state.steps):
             return "continue"
         else:
             return "end"
@@ -196,16 +261,23 @@ class UniversalPlanExecuteEngine:
         """外部调用依然是旧的配方，内部已经是全新的流水线。"""
         sys_logger.info(f"\n⚙ [引擎启动] 终极目标: {goal}")
 
-        # 1. 准备初始包裹 (包裹里的数据必须跟 TypedDict 严丝合缝)
-        initial_state: EngineState = {
-            "goal": goal,
-            "context": context,
-            "steps": predefined_steps or [],
-            "current_step_index": 0,
-            "scratchpad": {},
-            "detailed_results": {},
-            "max_tokens": max_tokens
-        }
+        # 1. 准备初始包裹 (包裹里的数据必须跟 TypedDict 严丝合缝) TypedDict
+        # initial_state: EngineState = {
+        #     "goal": goal,
+        #     "context": context,
+        #     "steps": predefined_steps or [],
+        #     "current_step_index": 0,
+        #     "scratchpad": {},
+        #     "detailed_results": {},
+        #     "max_tokens": max_tokens
+        # }
+        # Dataclass/Pydantic
+        initial_state = EngineState(
+            goal=goal,
+            context=context,
+            steps=predefined_steps or [],
+            max_tokens=max_tokens
+        )  # 其他的 index 和 dict 都会自动使用我们定义的默认值！
 
         # 2. 🌟 一键启动整个图！ainvoke 会把状态机跑到 END 为止，并返回最终状态
         final_state = await self.app.ainvoke(initial_state)
@@ -213,5 +285,8 @@ class UniversalPlanExecuteEngine:
         sys_logger.info("[引擎完工] 所有分布式思维链节点已执行完毕！")
 
         # 3. 从最终的包裹里掏出我们想要的结果返回给外界
-        return final_state["detailed_results"]
+        if isinstance(final_state, dict):
+            return final_state["detailed_results"]
+        else:
+            return final_state.detailed_results
 
