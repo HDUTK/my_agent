@@ -74,6 +74,9 @@ class EngineState(BaseModel):
     scratchpad: dict[str, str] = Field(default_factory=dict)
     detailed_results: dict[str, str] = Field(default_factory=dict)
 
+    # 🌟 🌟 🌟 【质检反馈字段】
+    feedback: str = Field(default="", description="质检员的报错反馈。如果有值，说明被打回重做")
+
 
 class TaskPlan(BaseModel):
     steps: list[str] = Field(description="为完成目标拆解出的按顺序执行的具体步骤清单")
@@ -104,18 +107,22 @@ class UniversalPlanExecuteEngine:
         # 1. 添加节点 (也就是车间的工位)
         workflow.add_node("planner_node", self.planner_node)
         workflow.add_node("executor_node", self.executor_node)
+        # 🌟 🌟 🌟 【将新员工“质检员”安排上工位】
+        workflow.add_node("reviewer_node", self.reviewer_node)
 
         # 2. 添加常规边 (定死的铁轨)
         workflow.add_edge(START, "planner_node")             # 启动后，必定先去规划师节点
         workflow.add_edge("planner_node", "executor_node")   # 规划完，必定交给执行者节点
+        workflow.add_edge("executor_node", "reviewer_node")  # 执行者干完活，必须把结果交给质检员
 
         # 3. 🌟 添加条件边 (智能分拣道岔，替代原有的 for 循环)
         workflow.add_conditional_edges(
-            "executor_node",           # 从哪个节点出来开始分流？
+            "reviewer_node",    # 现在由质检员节点出来分流！
             self.should_continue,      # 负责裁决的条件函数
             {
-                "continue": "executor_node", # 如果函数返回 "continue"，就流回执行节点（闭环循环）
-                "end": END                   # 如果函数返回 "end"，就流入大结局
+                "retry": "executor_node",  # 驳回：打回给执行者重写
+                "continue": "executor_node",  # 通过：继续做下一个任务
+                "end": END  # 通过：全部做完，杀青
             }
         )
 
@@ -174,7 +181,11 @@ class UniversalPlanExecuteEngine:
         current_task = steps[idx]
         max_tokens = state.max_tokens
 
-        print_and_log(f"\n⚙️ [执行节点 {idx + 1}/{len(steps)}] 正在处理: {current_task}...", "info")
+        # 🌟 🌟 🌟 【如果有报错，将报错信息注入提示词，按头让大模型认错】
+        feedback_msg = f"\n❌ [质检驳回信息]：{state.feedback}\n请立刻根据上述报错修改你的输出！\n" if state.feedback else ""
+        # 打印日志（区分是初次执行还是重做）
+        status_tag = "🔄 打回重做" if state.feedback else "⚙️ 正在处理"
+        print_and_log(f"\n⚙️ [{status_tag} {idx + 1}/{len(steps)}] 目标: {current_task}...", "info")
 
         # TypedDict
         # scratchpad_view = "\n".join([f"- {k}: {v}" for k, v in state["scratchpad"].items()]) or "目前是第一步，暂无历史进度。"
@@ -193,6 +204,7 @@ class UniversalPlanExecuteEngine:
             f"【背景资料】\n{state.context}\n\n"
             f"⚠️ 系统指令：请基于资料，立刻执行当前任务：【{current_task}】。\n"
             f"直接输出执行结果的纯文本大白话，绝对禁止使用 JSON 或任何排版代码块。"
+            f"{feedback_msg}"  # 🌟 把驳回信息拼接在最后，加重权重
         )
 
         content_chunks = []
@@ -223,22 +235,56 @@ class UniversalPlanExecuteEngine:
         # Dataclass/Pydantic
         new_scratchpad = state.scratchpad.copy()
         snippet = content[:100].replace("\n", "") + "..."
-        new_scratchpad[current_task] = f"[✅ 完成] 摘要: {snippet}"
+        new_scratchpad[current_task] = f"[✅ 暂存] 摘要: {snippet}"
 
-        # 核心：执行完后，把游标 (index) 加 1，并更新字典
+        # 执行节点不再有资格推动进度 (游标 +1被移除了)】
+        # 它只负责干活，能不能进入下一步，得看下一步的质检员点头！
         return {
-            "current_step_index": idx + 1,
             "scratchpad": new_scratchpad,
             "detailed_results": new_detailed_results
+        }
+
+    # 🌟 🌟 🌟 【质检员节点 (级别 A 纯代码规则审查)】
+    @staticmethod
+    async def reviewer_node(state: EngineState):
+        """节点 C：质检员。使用 Python 规则检查执行者的产出"""
+        idx = state.current_step_index
+        current_task = state.steps[idx]
+
+        # 把执行者刚刚存在字典里的最新结果拿出来检查
+        latest_content = state.detailed_results.get(current_task, "")
+
+        print_and_log(f"\n🔍 [审查节点] 正在对任务【{current_task}】的产出进行合规检查...", "info")
+
+        # 规则 1：查字数（防敷衍）
+        if len(latest_content.strip()) < 10:
+            msg = "输出内容过短（少于10个字符），请重新思考并提供详细的分析过程！"
+            sys_logger.warning(f"⚠️ [质检未通过] {msg}")
+            return {"feedback": msg}  # 记录报错信息
+
+        # 规则 2：查格式（因为我们在 prompt 里严禁了它输出 JSON）
+        if "```json" in latest_content or ("{" in latest_content and "}" in latest_content):
+            msg = "你生成的内容中包含了 JSON 格式字符。系统已明确要求必须使用纯文本！请去除所有代码块重写！"
+            sys_logger.warning(f"⚠️ [质检未通过] {msg}")
+            return {"feedback": msg}  # 记录报错信息
+
+        # ✅ 一旦所有规则通过：清除历史报错，并把游标往前推！
+        print_and_log("✅ [质检通过] 内容合规！准备归档并推进进度。", "info")
+        return {
+            "feedback": "",
+            "current_step_index": idx + 1  # 🌟 只有质检员签字了，进度才能往前走！
         }
 
 
     # -----------------------------------
     # 边函数区 (Edges)
     # -----------------------------------
-    def should_continue(self, state: EngineState) -> str:
-        """分拣道岔：判断是循环回 executor 还是结束"""
+    @staticmethod
+    def should_continue(state: EngineState) -> str:
+        """分拣道岔：判断是循环还是结束"""
         # 如果游标还没走到列表尽头，说明还有任务没做完
+        if state.feedback:
+            return "retry"  # 包裹里夹带着报错单，立刻打回执行者重写！
         # TypedDict
         # if state["current_step_index"] < len(state["steps"]):
         # Dataclass/Pydantic
