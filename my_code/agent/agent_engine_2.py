@@ -77,6 +77,9 @@ class EngineState(BaseModel):
     # 🌟 🌟 🌟 【质检反馈字段】
     feedback: str = Field(default="", description="质检员的报错反馈。如果有值，说明被打回重做")
 
+    # 🌟 🌟 🌟 【人类审批与 Critic 意见字段】
+    user_approval: str = Field(default="", description="人类用户的审批结果：Y(满意) 或 N(不满意)")
+    critic_feedback: str = Field(default="", description="Critic 专家节点或者人类给出的具体润色修改意见")
 
 class TaskPlan(BaseModel):
     steps: list[str] = Field(description="为完成目标拆解出的按顺序执行的具体步骤清单")
@@ -100,6 +103,12 @@ class UniversalPlanExecuteEngine:
             model=self.model,
             output_type=str
         )
+        # 🌟 🌟 🌟 【装配车间新员工 —— Critic 挑刺润色专家】
+        self.critic = Agent(
+            model=self.model,
+            system_prompt="你是一个眼光毒辣、追求完美的学术与技术报告评审专家。你的任务是审阅现有的报告，结合用户的修改意见，指出报告中逻辑不通、数据模糊或流于表面等缺点，并给出一份详尽的重写指导方案。",
+            output_type=str
+        )
 
         # 🌟 构建 LangGraph 状态机流水线
         workflow = StateGraph(EngineState)
@@ -109,6 +118,9 @@ class UniversalPlanExecuteEngine:
         workflow.add_node("executor_node", self.executor_node)
         # 🌟 🌟 🌟 【将新员工“质检员”安排上工位】
         workflow.add_node("reviewer_node", self.reviewer_node)
+        # 🌟 🌟 🌟 【将人类审批工位与 Critic 工位挂载到图上】
+        workflow.add_node("human_approval_node", self.human_approval_node)
+        workflow.add_node("critic_node", self.critic_node)
 
         # 2. 添加常规边 (定死的铁轨)
         workflow.add_edge(START, "planner_node")             # 启动后，必定先去规划师节点
@@ -116,15 +128,30 @@ class UniversalPlanExecuteEngine:
         workflow.add_edge("executor_node", "reviewer_node")  # 执行者干完活，必须把结果交给质检员
 
         # 3. 🌟 添加条件边 (智能分拣道岔，替代原有的 for 循环)
+        # 🌟 🌟 🌟 【自动化质检员出来的分流道岔】
         workflow.add_conditional_edges(
-            "reviewer_node",    # 现在由质检员节点出来分流！
-            self.should_continue,      # 负责裁决的条件函数
+            "reviewer_node",
+            self.should_continue_after_review,
             {
-                "retry": "executor_node",  # 驳回：打回给执行者重写
-                "continue": "executor_node",  # 通过：继续做下一个任务
-                "end": END  # 通过：全部做完，杀青
+                "retry_level_a": "executor_node",  # 级别 A 拦截：格式或字数不对，直接原地重试
+                "continue": "executor_node",  # 自动化步骤未完：继续做下一个任务
+                "go_to_human": "human_approval_node"  # 自动化步骤全完：正式进入级别 C 人工断点审查
             }
         )
+
+        # 🌟 🌟 🌟 【铺设人类审批节点流出后的条件道岔】
+        workflow.add_conditional_edges(
+            "human_approval_node",
+            self.should_continue_after_human,
+            {
+                "pass_and_end": END,  # 用户敲 Y：大结局，直接输出保存
+                "fail_to_critic": "critic_node"  # 用户敲 N：打入冷宫，交给 Critic 节点批判润色
+            }
+        )
+
+        # 🌟 🌟 🌟 【铺设 Critic 专家批判完后的铁轨】
+        # Critic 节点出具完修改方案后，铁轨死死地指向 executor_node，强迫系统带着反思重新整改！
+        workflow.add_edge("critic_node", "executor_node")
 
         # 编译为可执行应用 (拉下电闸)
         self.app = workflow.compile()
@@ -183,9 +210,18 @@ class UniversalPlanExecuteEngine:
 
         # 🌟 🌟 🌟 【如果有报错，将报错信息注入提示词，按头让大模型认错】
         feedback_msg = f"\n❌ [质检驳回信息]：{state.feedback}\n请立刻根据上述报错修改你的输出！\n" if state.feedback else ""
+
+        # 🌟 🌟 🌟 【动态注入高级 Critic 专家和人类的联合整改意见】
+        if state.critic_feedback:
+            feedback_msg += (
+                f"\n⚠️ ⚠️ ⚠️ [专家评审组与用户的联合整改意见]：\n"
+                f"{state.critic_feedback}\n"
+                f"请彻底吸取上述教训，深度重构并润色当前章节，拒绝敷衍！\n"
+            )
+
         # 打印日志（区分是初次执行还是重做）
-        status_tag = "🔄 打回重做" if state.feedback else "⚙️ 正在处理"
-        print_and_log(f"\n⚙️ [{status_tag} {idx + 1}/{len(steps)}] 目标: {current_task}...", "info")
+        status_tag = "🔄 专家整改重写" if state.critic_feedback else ("❌ 自动化重试" if state.feedback else "⚙️ 正在处理")
+        print_and_log(f"\n[{status_tag} {idx + 1}/{len(steps)}] 目标: {current_task}...", "info")
 
         # TypedDict
         # scratchpad_view = "\n".join([f"- {k}: {v}" for k, v in state["scratchpad"].items()]) or "目前是第一步，暂无历史进度。"
@@ -203,7 +239,7 @@ class UniversalPlanExecuteEngine:
             # Dataclass/Pydantic
             f"【背景资料】\n{state.context}\n\n"
             f"⚠️ 系统指令：请基于资料，立刻执行当前任务：【{current_task}】。\n"
-            f"直接输出执行结果的纯文本大白话，绝对禁止使用 JSON 或任何排版代码块。"
+            f"直接输出执行结果的纯文本大白话，绝对禁止使用 JSON 或任何排版代码块（除非我要求你这么做）。"
             f"{feedback_msg}"  # 🌟 把驳回信息拼接在最后，加重权重
         )
 
@@ -262,11 +298,14 @@ class UniversalPlanExecuteEngine:
             sys_logger.warning(f"⚠️ [质检未通过] {msg}")
             return {"feedback": msg}  # 记录报错信息
 
-        # 规则 2：查格式（因为我们在 prompt 里严禁了它输出 JSON）
-        if "```json" in latest_content or ("{" in latest_content and "}" in latest_content):
-            msg = "你生成的内容中包含了 JSON 格式字符。系统已明确要求必须使用纯文本！请去除所有代码块重写！"
-            sys_logger.warning(f"⚠️ [质检未通过] {msg}")
-            return {"feedback": msg}  # 记录报错信息
+        # 🌟 🌟 🌟 动态判断：用户/规划师是不是本来就想要 JSON？
+        is_json_expected = "json" in state.goal.lower() or "json" in current_task.lower()
+        # 规则 2：查格式（只有在不期望输出 JSON 的时候，才执行拦截！）
+        if not is_json_expected:
+            if "```json" in latest_content or ("{" in latest_content and "}" in latest_content):
+                msg = "系统检测到非预期的 JSON 格式。本环节必须使用纯文本描述！请去除所有代码块重写！"
+                sys_logger.warning(f"⚠️ [质检未通过] {msg}")
+                return {"feedback": msg}
 
         # ✅ 一旦所有规则通过：清除历史报错，并把游标往前推！
         print_and_log("✅ [质检通过] 内容合规！准备归档并推进进度。", "info")
@@ -275,27 +314,101 @@ class UniversalPlanExecuteEngine:
             "current_step_index": idx + 1  # 🌟 只有质检员签字了，进度才能往前走！
         }
 
+    # 🌟 🌟 🌟 【级别 C —— 控制台人工审批断点节点】
+    @staticmethod
+    async def human_approval_node(state: EngineState):
+        """人类审查节点。在此挂起流传，把最终合成的完整结果呈报给人类看"""
+        print("\n" + "═" * 40 + " 📊 最终报告呈报中心 (人类断点审查) " + "═" * 40)
+
+        # 拼装目前所有的章节内容展现给用户看
+        for title, content in state.detailed_results.items():
+            print(f"\n【章节：{title}】")
+            print("-" * 50)
+            print(content)
+            print("-" * 50)
+
+        print("\n" + "═" * 110)
+
+        # 💡 利用标准 Python input() 强制卡死传送带，等待主人落子！
+        while True:
+            user_choice = input(
+                "👉 以上为系统为您生成的全量报告。您是否满意？(输入 Y 批准输出 | 输入 N 驳回并送去专家组整改): ").strip().upper()
+            if user_choice in ['Y', 'N']:
+                break
+            print("❌ 输入非法！请严格输入 Y 或 N。")
+
+        # 如果不满意，顺便收集一下主人的“御旨”
+        user_opinion = ""
+        if user_choice == 'N':
+            user_opinion = input("📝 请输入您的具体修改意见（比如：‘第三章写得太肤浅，多加点传感器异常案例’）：").strip()
+
+        # 把人类的选择和意见打包存入包裹，送去下一个道岔
+        return {
+            "user_approval": user_choice,
+            "critic_feedback": user_opinion
+        }
+
+    # 🌟 🌟 🌟 【级别 B —— Critic 智能反思节点】
+    async def critic_node(self, state: EngineState):
+        """Critic 专家节点。当人类说 N 时触发，用高强度 Prompt 压榨 LLM 生成挑刺方案"""
+        print_and_log("\n🛑 [评审会商中...] 正在召集 AI 专家组联合诊断报告缺陷...", "info")
+
+        # 把当前的报告和人类的意见揉在一起
+        current_report_dump = "\n".join([f"## {k}\n{v}" for k, v in state.detailed_results.items()])
+
+        critic_prompt = (
+            f"【当前生成的报告初稿如下】\n{current_report_dump}\n\n"
+            f"【最终用户（老板）的无情驳回意见如下】\n{state.critic_feedback}\n\n"
+            f"请站在极度严苛的视角，指出这份初稿为什么不能让用户满意？"
+            f"请给出一份高水平的、一针见血的‘整改方案清单’，告诉 Executor 接下来该如何重写。"
+        )
+
+        # 呼叫 Critic 智能体
+        critic_resp = await self.critic.run(critic_prompt)
+
+        expert_opinion = critic_resp.output
+        print_and_log(f"\n🧠 [专家组评审报告出炉]：\n{expert_opinion}\n", "info")
+
+        # 💡 将游标重置为减 1，让它退回到最后一个任务进行“原地重写整改”，而不是从头洗牌
+        # 如果你依然想从头洗牌，可以将这里改为 0
+        rollback_index = max(0, state.current_step_index - 1)
+
+        return {
+            "critic_feedback": f"【人类意见】：{state.critic_feedback}\n【专家组方案】：{expert_opinion}",
+            "current_step_index": rollback_index  # 时光倒流到倒数最后一步，精准整改
+        }
+
 
     # -----------------------------------
     # 边函数区 (Edges)
     # -----------------------------------
+    # 🌟 🌟 🌟 【分拆并重构条件道岔逻辑】
     @staticmethod
-    def should_continue(state: EngineState) -> str:
-        """分拣道岔：判断是循环还是结束"""
-        # 如果游标还没走到列表尽头，说明还有任务没做完
+    def should_continue_after_review(state: EngineState) -> str:
+        """自动化质检员后面的分流器"""
         if state.feedback:
-            return "retry"  # 包裹里夹带着报错单，立刻打回执行者重写！
-        # TypedDict
-        # if state["current_step_index"] < len(state["steps"]):
-        # Dataclass/Pydantic
+            return "retry_level_a"  # 级别 A 没过：格式错了，原地重做
+
+        # 如果自动化流程还没跑完所有步骤，继续推着游标往前跑
         if state.current_step_index < len(state.steps):
+            # 此时游标已经在 reviewer_node 内部完成递增了，直接进行边界判断
             return "continue"
         else:
-            return "end"
+            # 自动化全部干完，终于有资格面圣了，移交人类工位
+            return "go_to_human"
 
+    @staticmethod
+    def should_continue_after_human(state: EngineState) -> str:
+        """人类审批节点后面的分流器"""
+        if state.user_approval == 'Y':
+            print_and_log("\n🎉 [大喜] 报告获得人类最终批准！正在准备落盘输出...", "info")
+            return "pass_and_end"
+        else:
+            print_and_log("\n⚠️ [打回] 报告遭到人类驳回！正式移交专家组处理...", "warning")
+            return "fail_to_critic"
 
     # -----------------------------------
-    # 对外暴露的启动接口 (不变！)
+    # 对外暴露的启动接口
     # -----------------------------------
     async def run(
             self,
