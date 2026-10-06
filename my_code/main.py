@@ -22,6 +22,7 @@ import asyncio
 from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import UsageLimits
 
 # 导入mcp客户端组件
 from mcp.client.stdio import stdio_client, StdioServerParameters
@@ -32,7 +33,7 @@ from utils.core_utils import trim_history
 from agent.agent_builder import build_agent_with_mcp
 from utils.logger_print import sys_logger, print_and_log
 # 配置
-from config.system_config import my_model_name, my_scenario_name
+from config.system_config import USE_LOCAL_MODEL, LOCAL_MODEL_NAME, REMOTE_MODEL_NAME, my_scenario_name
 from config.agent_config import LLM_CONFIG
 
 # 加载所有环境变量配置
@@ -44,6 +45,17 @@ load_dotenv()
 # ==========================================
 async def run_chat_loop(agent: Agent):
     """控制台聊天引擎：只负责跟用户互动"""
+    print_and_log("\n" + "═" * 50, "info")
+
+    if USE_LOCAL_MODEL:
+        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['local'][LOCAL_MODEL_NAME.lower()]['model_name']}", "info")
+    else:
+        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['remote'][REMOTE_MODEL_NAME.lower()]['type']}", "info")
+    
+    # 如果你的场景变量名不叫 scenario_name，请换成你实际传递给 agent_builder 的那个变量
+    print_and_log(f"🎭 [当前人设 (System Prompt)]: {my_scenario_name}", "info")
+    print_and_log("═" * 50, "info")
+
     print_and_log("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。", "info")
     history = []
 
@@ -71,7 +83,8 @@ async def run_chat_loop(agent: Agent):
             async with agent.run_stream(
                     user_input,
                     message_history=history,
-                    model_settings=ModelSettings(max_tokens=LLM_CONFIG["input_max_tokens"])
+                    model_settings=ModelSettings(max_tokens=LLM_CONFIG["input_max_tokens"]),
+                    usage_limits=UsageLimits(request_limit=8, tool_calls_limit=5)
                     # 限制大模型最多生成 input_max_tokens 个 Token (防废话，防破产)
             ) as resp:
 
@@ -107,7 +120,7 @@ async def run_chat_loop(agent: Agent):
 # ==========================================
 # Main 函数
 # ==========================================
-async def main(model_name: str, scenario_name: str):
+async def main(local_remote_flag: bool, model_name: str, scenario_name: str):
     sys_logger.info(f"系统启动中... [当前指定模型: {model_name}]")
 
     # 第一步：定义后厨位置——启动连接（对接 MCP Server）
@@ -127,4 +140,9 @@ async def main(model_name: str, scenario_name: str):
 
 
 if __name__ == "__main__":
-    asyncio.run(main(model_name=my_model_name, scenario_name=my_scenario_name))
+    if USE_LOCAL_MODEL:
+        asyncio.run(main(local_remote_flag=USE_LOCAL_MODEL, model_name=LOCAL_MODEL_NAME,
+                         scenario_name=my_scenario_name))
+    else:
+        asyncio.run(main(local_remote_flag=USE_LOCAL_MODEL, model_name=REMOTE_MODEL_NAME,
+                         scenario_name=my_scenario_name))

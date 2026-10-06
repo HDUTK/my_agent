@@ -70,7 +70,11 @@ class EngineState(BaseModel):
 
     # Pydantic 同样支持默认值工厂
     steps: list[str] = Field(default_factory=list)
-    current_step_index: int = Field(default=0)
+    # current_step_index: int = Field(default=0)
+    # 🌟 🌟 🌟 【废除 current_step_index，引入任务队列】
+    # 里面存的是步骤的索引数字，比如 [0, 1, 2]。为空代表全部做完。
+    pending_tasks: list[int] = Field(default_factory=list)
+
     scratchpad: dict[str, str] = Field(default_factory=dict)
     detailed_results: dict[str, str] = Field(default_factory=dict)
 
@@ -175,27 +179,36 @@ class UniversalPlanExecuteEngine:
 
         if steps:
             sys_logger.info("检测到预设任务清单，跳过 AI 规划，直接采用预设步骤。")
-            # 这里返回 {"steps": steps} 意味着更新包裹里的 steps 字段
-            return {"steps": steps}
+            new_steps = steps
+        else:
+            sys_logger.info("正在呼叫规划师进行任务拆解...")
+            plan_resp = await self.planner.run(
+                f"目标：{goal}\n\n背景上下文：\n{context[:2000]}...",
+                model_settings=ModelSettings(max_tokens=PLANNER_MAX_TOKENS)
+            )
 
-        sys_logger.info("正在呼叫规划师进行任务拆解...")
-        plan_resp = await self.planner.run(
-            f"目标：{goal}\n\n背景上下文：\n{context[:2000]}...",
-            model_settings=ModelSettings(max_tokens=PLANNER_MAX_TOKENS)
-        )
+            usage = plan_resp.usage()
+            print_and_log(f" [Token结算 - 规划师] 输入: {usage.input_tokens} | 输出: {usage.output_tokens}", "info")
 
-        usage = plan_resp.usage()
-        print_and_log(f" [Token结算 - 规划师] 输入: {usage.input_tokens} | 输出: {usage.output_tokens}", "info")
+            new_steps = plan_resp.output.steps
 
-        new_steps = plan_resp.output.steps
         sys_logger.info(f"执行清单已确认，共 {len(new_steps)} 步：")
         for i, s in enumerate(new_steps):
             sys_logger.info(f"   [{i + 1}] {s}")
 
-        return {"steps": new_steps}
+        # 如果有 3 步，队列就是 [0, 1, 2]
+        initial_queue = list(range(len(new_steps)))
+
+        return {"steps": new_steps,
+                "pending_tasks": initial_queue
+                }
 
     async def executor_node(self, state: EngineState):
         """节点 B：单步执行者。它每次只处理 1 个步骤！"""
+        # 🌟 防御性校验
+        if not state.pending_tasks:
+            return {}
+
         # TypedDict
         # idx = state["current_step_index"]
         # steps = state["steps"]
@@ -203,7 +216,9 @@ class UniversalPlanExecuteEngine:
         # max_tokens = state["max_tokens"]
 
         # Dataclass/Pydantic
-        idx = state.current_step_index
+        # idx = state.current_step_index
+        # 🌟 🌟 🌟 【核心修改 3：永远从队列最前面拿任务，干完为止】
+        idx = state.pending_tasks[0]
         steps = state.steps
         current_task = steps[idx]
         max_tokens = state.max_tokens
@@ -284,7 +299,11 @@ class UniversalPlanExecuteEngine:
     @staticmethod
     async def reviewer_node(state: EngineState):
         """节点 C：质检员。使用 Python 规则检查执行者的产出"""
-        idx = state.current_step_index
+        if not state.pending_tasks: return {}
+
+        # idx = state.current_step_index
+        # 检查正在执行的这个任务（依然是队列头）
+        idx = state.pending_tasks[0]
         current_task = state.steps[idx]
 
         # 把执行者刚刚存在字典里的最新结果拿出来检查
@@ -309,9 +328,15 @@ class UniversalPlanExecuteEngine:
 
         # ✅ 一旦所有规则通过：清除历史报错，并把游标往前推！
         print_and_log("✅ [质检通过] 内容合规！准备归档并推进进度。", "info")
+
+        # 🌟 🌟 🌟 【质检通过！把这个任务从待办队列中“弹”出去！】
+        # 比如原本是 [0, 2]，现在变成了 [2]
+        new_pending = state.pending_tasks[1:]
+
         return {
             "feedback": "",
-            "current_step_index": idx + 1  # 🌟 只有质检员签字了，进度才能往前走！
+            # "current_step_index": idx + 1  # 🌟 只有质检员签字了，进度才能往前走！
+            "pending_tasks": new_pending  # 更新队列！
         }
 
     # 🌟 🌟 🌟 【级别 C —— 控制台人工审批断点节点】
@@ -339,19 +364,60 @@ class UniversalPlanExecuteEngine:
 
         # 如果不满意，顺便收集一下主人的“御旨”
         user_opinion = ""
+
+        redo_queue = []
+        # 🌟 🌟 🌟 【如果人类不满意，询问具体重做哪些步骤！】
         if user_choice == 'N':
-            user_opinion = input("📝 请输入您的具体修改意见（比如：‘第三章写得太肤浅，多加点传感器异常案例’）：").strip()
+            # 💡 贴心设计：打印一个精简版的步骤目录，防止用户看完长文后忘记序号
+            print("\n" + "═" * 20 + " 📑 报告步骤清单（供您点选） " + "═" * 20)
+            for i, title in enumerate(state.steps):
+                print(f"  [{i + 1}] {title}")
+            print("═" * 63 + "\n")
+
+            while True:
+                redo_input = input(
+                    "🎯 请输入需要重做的步骤序号 (例如输入 '2' 重做第二步，'1,3' 重做第一和第三步。填 '0' 代表全部重做): ").strip()
+                if not redo_input:
+                    continue
+
+                if redo_input == '0':
+                    # 全部重做，队列满载
+                    redo_queue = list(range(len(state.steps)))
+                    break
+                else:
+                    try:
+                        # 解析逗号分隔的输入 (用户输入 1, 3 -> 我们转成程序认识的 0, 2)
+                        redo_queue = [int(x.strip()) - 1 for x in redo_input.split(',')]
+                        # 防呆校验
+                        if all(0 <= x < len(state.steps) for x in redo_queue):
+                            break
+                        else:
+                            print(f"❌ 序号越界！请输入 1 到 {len(state.steps)} 之间的数字。")
+                    except ValueError:
+                        print("❌ 格式错误！请使用纯数字和英文逗号（如 1,3）。")
+
+            # 第二问：选定步骤后，再针对性地询问修改意见
+            user_opinion = input("\n📝 请输入您的具体修改意见（比如：‘第三章数据太少，重新分析’）：").strip()
+
+            print_and_log(f"🔄 系统已记录重做队列，准备回炉重造步骤: {[x + 1 for x in redo_queue]}", "warning")
+
+        # if user_choice == 'N':
+        #     user_opinion = input("📝 请输入您的具体修改意见（比如：‘第三章写得太肤浅，多加点传感器异常案例’）：").strip()
 
         # 把人类的选择和意见打包存入包裹，送去下一个道岔
         return {
             "user_approval": user_choice,
-            "critic_feedback": user_opinion
+            "critic_feedback": user_opinion,
+            "pending_tasks": redo_queue  # 🌟 将新的重做清单塞回任务队列！
         }
 
     # 🌟 🌟 🌟 【级别 B —— Critic 智能反思节点】
     async def critic_node(self, state: EngineState):
         """Critic 专家节点。当人类说 N 时触发，用高强度 Prompt 压榨 LLM 生成挑刺方案"""
         print_and_log("\n🛑 [评审会商中...] 正在召集 AI 专家组联合诊断报告缺陷...", "info")
+
+        # 🌟 🌟 🌟 【Critic 只需要看用户圈出来要修改的那些章节，而不是一顿乱喷】
+        redo_titles = [state.steps[i] for i in state.pending_tasks]
 
         # 把当前的报告和人类的意见揉在一起
         current_report_dump = "\n".join([f"## {k}\n{v}" for k, v in state.detailed_results.items()])
@@ -375,7 +441,7 @@ class UniversalPlanExecuteEngine:
 
         return {
             "critic_feedback": f"【人类意见】：{state.critic_feedback}\n【专家组方案】：{expert_opinion}",
-            "current_step_index": rollback_index  # 时光倒流到倒数最后一步，精准整改
+            # "current_step_index": rollback_index  # 时光倒流到倒数最后一步，精准整改
         }
 
 
@@ -389,13 +455,19 @@ class UniversalPlanExecuteEngine:
         if state.feedback:
             return "retry_level_a"  # 级别 A 没过：格式错了，原地重做
 
-        # 如果自动化流程还没跑完所有步骤，继续推着游标往前跑
-        if state.current_step_index < len(state.steps):
-            # 此时游标已经在 reviewer_node 内部完成递增了，直接进行边界判断
+        # 🌟 🌟 🌟 【核心修改 6：道岔只看队列里还有没有任务】
+        if len(state.pending_tasks) > 0:
             return "continue"
         else:
-            # 自动化全部干完，终于有资格面圣了，移交人类工位
             return "go_to_human"
+
+        # # 如果自动化流程还没跑完所有步骤，继续推着游标往前跑
+        # if state.current_step_index < len(state.steps):
+        #     # 此时游标已经在 reviewer_node 内部完成递增了，直接进行边界判断
+        #     return "continue"
+        # else:
+        #     # 自动化全部干完，终于有资格面圣了，移交人类工位
+        #     return "go_to_human"
 
     @staticmethod
     def should_continue_after_human(state: EngineState) -> str:

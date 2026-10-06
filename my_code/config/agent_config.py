@@ -15,32 +15,65 @@ Target Python:
 # ==========================================
 LLM_CONFIG = {
     "model": {
-        "gemini": {
-            "model_name": "gemini",
-            # gemini-2.0-flash/gemini-2.5-flash/gemini-2.5-pro/gemini-3-flash-preview/
-            # gemini-3-pro-preview/gemini-3.1-pro-preview/gemini-3.5-flash
-            "type": "gemini-2.5-flash"
+        "remote": {
+            "gemini": {
+                "model_name": "gemini",
+                # gemini-2.0-flash/gemini-2.5-flash/gemini-2.5-pro/gemini-3-flash-preview/
+                # gemini-3-pro-preview/gemini-3.1-pro-preview/gemini-3.5-flash
+                "type": "gemini-2.5-flash"
+            },
+            "gpt": {
+                "model_name": "gpt",
+                "type": "gpt-4o-mini"
+            },
+            "qwen": {
+                "model_name": "qwen",
+                # qwen-plus（已用82%）/qwen3.8-max
+                "type": "qwen3.8-max",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            },
+            "zhipu": {
+                "model_name": "zhipu",
+                "type": "glm-4-flash",
+                "base_url": "https://open.bigmodel.cn/api/paas/v4/"
+            },
+            "hunyuan": {
+                "model_name": "hunyuan",
+                "type": "hunyuan-lite",
+                "base_url": "https://api.hunyuan.cloud.tencent.com/v1"
+            },
+            "spark": {
+                "model_name": "spark",
+                "type": "4.0Ultra",
+                "base_url": "https://spark-api-open.xf-yun.com/v1"
+            }
         },
-        "gpt": {
-            "model_name": "gpt",
-            "type": "gpt-4o-mini"
-        },
-        "qwen": {
-            "model_name": "qwen",
-            # qwen-plus（已用82%）/qwen3.7-plus
-            "type": "qwen3.7-plus"
-        },
-        "zhipu": {
-            "model_name": "zhipu",
-            "type": "glm-4-flash"
-        },
-        "hunyuan": {
-            "model_name": "hunyuan",
-            "type": "hunyuan-lite"
-        },
-        "spark": {
-            "model_name": "spark",
-            "type": "4.0Ultra"
+        "local": {
+            "deepseek-r1": {
+                "model_name": "deepseek-r1",
+                "ollama_name": "deepseek-r1:8b",
+                "base_url": "http://localhost:11434/v1"  # Ollama 默认的本地服务地址
+            },
+            "gemma3": {
+                "model_name": "gemma3",
+                "ollama_name": "gemma3:4b",
+                "base_url": "http://localhost:11434/v1"
+            },
+            "gemma4": {
+                "model_name": "gemma4",
+                "ollama_name": "gemma4:e4b",
+                "base_url": "http://localhost:11434/v1"
+            },
+            "qwen2.5-coder": {
+                "model_name": "qwen2.5-coder",
+                "ollama_name": "qwen2.5-coder:7b",
+                "base_url": "http://localhost:11434/v1"
+            },
+            "qwen3": {
+                "model_name": "qwen3",
+                "ollama_name": "qwen3:8b",
+                "base_url": "http://localhost:11434/v1"
+            },
         }
     },
     "input_max_tokens": 3000,  # 限制大模型最多生成 3000 个 Token (防废话，防破产)

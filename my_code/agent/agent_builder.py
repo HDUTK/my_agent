@@ -149,7 +149,14 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
     sys_logger.info(f"📦 [Agent组装] 成功从 Server 发现 {len(mcp_tools)} 个远程工具: {tool_names}")
 
     # 2. 编写工具说明书 (系统提示词)
-    tools_instruction = "你现在连接到了一个本地工具库，可以使用以下工具：\n\n"
+    tools_instruction = (
+        "你现在连接到了一个本地工具库，可以使用以下工具。\n\n"
+        "【工具调用边界 - 必须严格遵守】\n"
+        "1. 用户只是打招呼、闲聊、问候、致谢，或没有明确要求读取/查询/修改本地资源时，绝对不要调用任何工具，直接用自然语言简短回复。\n"
+        "2. 只有当用户明确提出需要查看文件、列目录、查询 CSV、读取 Word、检索本地知识库、保存结果、修改文件等任务时，才允许调用工具。\n"
+        "3. 不要根据示例、系统提示词、历史任务或自己的猜测编造文件夹/文件名。用户没有明确给路径时，先询问用户提供路径。\n"
+        "4. 如果工具返回文件或文件夹不存在，最多再尝试一次合理的路径修正；仍失败时必须停止工具调用，并向用户说明需要确认路径。\n\n"
+    )
     for tool in mcp_tools:
         tools_instruction += f"- 名称: {tool.name}\n"
         tools_instruction += f"  描述: {tool.description}\n"

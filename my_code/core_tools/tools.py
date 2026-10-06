@@ -62,7 +62,7 @@ def read_file(file_path: str) -> str:
         return msg
 
 
-def get_file_names(folder_path: str) -> list[str]:
+def get_file_names(folder_path: str) -> str:
     """返回指定文件夹内所有文件的文件名（不包括子文件夹内的文件）"""
     try:
         # 列出文件夹内所有条目
@@ -70,16 +70,19 @@ def get_file_names(folder_path: str) -> list[str]:
         # 过滤出文件（保留文件名，不含路径）
         files = [f for f in entries if os.path.isfile(os.path.join(folder_path, f))]
         sys_logger.info(f"[工具执行] 成功获取文件夹 '{folder_path}' 的文件列表，共 {len(files)} 个文件。")
-        return files
+        return json.dumps(files, ensure_ascii=False)
     except FileNotFoundError:
-        sys_logger.error(f"错误：文件夹 '{folder_path}' 不存在")
-        return []
+        msg = f"错误：文件夹 '{folder_path}' 不存在。请停止猜测路径，并向用户确认正确路径。"
+        sys_logger.error(msg)
+        return msg
     except PermissionError:
-        sys_logger.error(f"错误：没有权限访问文件夹 '{folder_path}'")
-        return []
+        msg = f"错误：没有权限访问文件夹 '{folder_path}'。请停止重试，并向用户说明权限问题。"
+        sys_logger.error(msg)
+        return msg
     except Exception as e:
-        sys_logger.error(f"获取文件列表发生未知错误：{e}")
-        return []
+        msg = f"获取文件列表发生未知错误：{e}。请停止重试，并向用户说明问题。"
+        sys_logger.error(msg)
+        return msg
 
 
 def rename_file(file_path: str, new_name: str) -> bool:
@@ -116,6 +119,10 @@ def query_csv(file_path: str, query_string: str) -> str:
 
     if not os.path.exists(file_path):
         msg = f"错误: 找不到文件 {file_path}"
+        sys_logger.error(msg)
+        return msg
+    if os.path.isdir(file_path):
+        msg = f"错误: {file_path} 是文件夹，不是 CSV 文件。请停止把文件夹当作 CSV 查询，并向用户确认具体文件路径。"
         sys_logger.error(msg)
         return msg
 
