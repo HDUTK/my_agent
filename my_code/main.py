@@ -18,7 +18,7 @@ version: V1.0
 Target Python: 3.14 -> 3.12
 """
 
-import asyncio
+import os
 from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
@@ -36,45 +36,55 @@ from utils.logger_print import sys_logger, print_and_log
 from config.system_config import USE_LOCAL_MODEL, LOCAL_MODEL_NAME, REMOTE_MODEL_NAME, my_scenario_name
 from config.agent_config import LLM_CONFIG
 
+# langsmith监控
+from langsmith import traceable
+
+# Phoenix监控
+import asyncio
+from opentelemetry import trace
+from utils.logger_print import sys_logger
+
 # 加载所有环境变量配置
 load_dotenv()
 
-
 # ==========================================
-# 用户交互界面
+# 🌟 Phoenix 动态开关装配
 # ==========================================
-async def run_chat_loop(agent: Agent):
-    """控制台聊天引擎：只负责跟用户互动"""
-    print_and_log("\n" + "═" * 50, "info")
+# 读取 Phoenix 开关（不区分大小写）
+ENABLE_PHOENIX = os.getenv("ENABLE_PHOENIX", "false").lower() in ("true", "1", "yes")
+PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "TK_Personal_Agent_Phoenix")
+PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
+if ENABLE_PHOENIX:
+    print("🔭 [可观测性] Phoenix 监控已启用，正在上报至 6006 端口")
+    try:
+        from phoenix.otel import register
+        from openinference.instrumentation.openai import OpenAIInstrumentor
 
-    if USE_LOCAL_MODEL:
-        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['local'][LOCAL_MODEL_NAME.lower()]['model_name']}", "info")
-    else:
-        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['remote'][REMOTE_MODEL_NAME.lower()]['type']}", "info")
-    
-    # 如果你的场景变量名不叫 scenario_name，请换成你实际传递给 agent_builder 的那个变量
-    print_and_log(f"🎭 [当前人设 (System Prompt)]: {my_scenario_name}", "info")
-    print_and_log("═" * 50, "info")
+        tracer_provider = register(
+            project_name=PHOENIX_PROJECT_NAME,
+            endpoint=PHOENIX_ENDPOINT
+        )
+        OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        sys_logger.info("🔭 [可观测性] Phoenix 监控已启用，正在上报至 6006 端口")
+    except Exception as e:
+        sys_logger.warning(f"⚠️ [可观测性] Phoenix 初始化失败，降级为关闭状态: {e}")
+else:
+    print("🔒 [可观测性] Phoenix 监控处于关闭状态（No-op 模式）")
+    sys_logger.info("🔒 [可观测性] Phoenix 监控处于关闭状态（No-op 模式）")
 
-    print_and_log("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。", "info")
-    history = []
+# 全局 Tracer（当未初始化 provider 时，自动返回 No-op 空操作追踪器）
+tracer = trace.get_tracer(__name__)
 
-    while True:
-        user_input = await asyncio.to_thread(input, "\n输入：")
 
-        if user_input.strip().lower() == 'exit':
-            print_and_log("👋 Agent 已退出。", "info")
-            sys_logger.info("-" * 50)
-            sys_logger.info("\n" * 5)
-            break
+# 🌟 将“单次回合”的逻辑单独抽离，并打上摄像头
+@traceable(name="Agent_单回合对话_Turn")  # langSmith
+async def process_single_turn(agent: Agent, user_input: str, history: list) -> list:
+    """处理单次对话回合，并返回更新后的记忆"""
+    # 🌟 核心修改：用 OTel 创建单回合根节点 (Root Span)，将该回合的所有操作聚合为一棵树
+    with tracer.start_as_current_span("Agent_单回合对话_Turn") as root_span:
+        # 将用户输入写入 Span 属性
+        root_span.set_attribute("input.value", user_input)
 
-        if not user_input.strip():
-            continue
-
-        # 🌟 每次提问前，先对历史记忆进行安全截断（保留最近 max_messages 条有价值的信息）
-        history = trim_history(history, max_messages=LLM_CONFIG["history_max_messages"])
-
-        # print(f"🧹 (当前记忆长度: {len(history)} 条)")
         print_and_log("🤖 思考中...\n回答: ", "info", end="", flush=True)
 
         try:
@@ -104,9 +114,8 @@ async def run_chat_loop(agent: Agent):
                 print_and_log(f"\n{token_msg}", "info")
 
                 # 🌟 在水流完之后，更新聊天记录
-                history = resp.all_messages()
+                return resp.all_messages()
 
-            print("-" * 50)
         except Exception as e:
             # 报错写入日志，但屏幕上也要给用户一个温柔的提示
             sys_logger.error(f"大模型处理或工具调用时遇到错误：\n{e}")
@@ -114,7 +123,50 @@ async def run_chat_loop(agent: Agent):
 
             print(f"\n🚨 抱歉，大模型处理或工具调用时遇到错误，后台已自动捕获并记录。")
             print(" 程序仍在运行，您可以尝试重新提问，或等待网络恢复。")
-            print("-" * 50)
+            return history
+
+
+# ==========================================
+# 用户交互界面
+# ==========================================
+async def run_chat_loop(agent: Agent):
+    """控制台聊天引擎：只负责跟用户互动"""
+    print_and_log("\n" + "═" * 50, "info")
+
+    if USE_LOCAL_MODEL:
+        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['local'][LOCAL_MODEL_NAME.lower()]['model_name']}", "info")
+    else:
+        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['remote'][REMOTE_MODEL_NAME.lower()]['type']}", "info")
+
+    # 如果你的场景变量名不叫 scenario_name，请换成你实际传递给 agent_builder 的那个变量
+    print_and_log(f"🎭 [当前人设 (System Prompt)]: {my_scenario_name}", "info")
+    print_and_log("═" * 50, "info")
+
+    print_and_log("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。", "info")
+    history = []
+
+    while True:
+        user_input = await asyncio.to_thread(input, "\n输入：")
+
+        if user_input.strip().lower() == 'exit':
+            print_and_log("👋 Agent 已退出。", "info")
+            sys_logger.info("-" * 50)
+            sys_logger.info("\n" * 5)
+            break
+
+        if not user_input.strip():
+            continue
+
+        # 🌟 每次提问前，先对历史记忆进行安全截断（保留最近 max_messages 条有价值的信息）
+        history = trim_history(history, max_messages=LLM_CONFIG["history_max_messages"])
+
+        # print(f"🧹 (当前记忆长度: {len(history)} 条)")
+
+        # 🌟 将输入交给监控函数处理，并接收新的记忆
+        # noinspection PyUnresolvedReferences
+        history = await process_single_turn(agent, user_input, history)
+
+        print("-" * 50)
 
 
 # ==========================================

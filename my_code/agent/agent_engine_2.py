@@ -26,6 +26,9 @@ from langgraph.graph import StateGraph, START, END
 from utils.logger_print import sys_logger, print_and_log
 from config.agent_config import PLANNER_MAX_TOKENS, EXECUTOR_MAX_TOKENS
 
+# langsmith监控
+from langsmith import traceable
+
 
 # ==========================================
 # 1. 泛化状态 (State) - 流水线上的包裹（TypedDict 版）
@@ -165,6 +168,7 @@ class UniversalPlanExecuteEngine:
     # 节点函数区 (Node)
     # 规则：接收 state，只负责返回你想更新的 state 字段
     # -----------------------------------
+    @traceable(name="Node_A_规划师")
     async def planner_node(self, state: EngineState):
         """节点 A：规划师。负责生成 steps 列表"""
         # TypedDict
@@ -203,6 +207,7 @@ class UniversalPlanExecuteEngine:
                 "pending_tasks": initial_queue
                 }
 
+    @traceable(name="Node_B_单步执行者")
     async def executor_node(self, state: EngineState):
         """节点 B：单步执行者。它每次只处理 1 个步骤！"""
         # 🌟 防御性校验
@@ -297,6 +302,7 @@ class UniversalPlanExecuteEngine:
 
     # 🌟 🌟 🌟 【质检员节点 (级别 A 纯代码规则审查)】
     @staticmethod
+    @traceable(name="Node_C_质检员")
     async def reviewer_node(state: EngineState):
         """节点 C：质检员。使用 Python 规则检查执行者的产出"""
         if not state.pending_tasks: return {}
@@ -341,6 +347,7 @@ class UniversalPlanExecuteEngine:
 
     # 🌟 🌟 🌟 【级别 C —— 控制台人工审批断点节点】
     @staticmethod
+    @traceable(name="Node_Human_人类审批断点")
     async def human_approval_node(state: EngineState):
         """人类审查节点。在此挂起流传，把最终合成的完整结果呈报给人类看"""
         print("\n" + "═" * 40 + " 📊 最终报告呈报中心 (人类断点审查) " + "═" * 40)
@@ -412,6 +419,7 @@ class UniversalPlanExecuteEngine:
         }
 
     # 🌟 🌟 🌟 【级别 B —— Critic 智能反思节点】
+    @traceable(name="Node_Critic_专家反思")
     async def critic_node(self, state: EngineState):
         """Critic 专家节点。当人类说 N 时触发，用高强度 Prompt 压榨 LLM 生成挑刺方案"""
         print_and_log("\n🛑 [评审会商中...] 正在召集 AI 专家组联合诊断报告缺陷...", "info")

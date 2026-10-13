@@ -27,12 +27,16 @@ from utils.core_utils import load_prompt
 from RAG.document_parser import read_any_file
 from utils.logger_print import sys_logger
 
+# langsmith监控
+from langsmith import traceable
+
 
 # ==========================================
 # 工具制造厂 (闭包工厂)
 # ==========================================
 def make_mcp_tool(session: ClientSession):
     """闭包工厂：接收一个 session，返回一个绑定好的工具调用网关"""
+    @traceable(name="MCP_远程工具调用")
     async def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         sys_logger.info(f"[远程调用] 正在请求 Server 执行工具: {tool_name} | 传入参数: {arguments}")
 
@@ -78,10 +82,11 @@ class UniversalEngineTool:
     """
     将重度任务引擎封装为类，实现配置与逻辑的解耦。
     """
-    def __init__(self, model_name: str):
-        # 初始化时将系统级的参数（模型名称）冻结在实例内部
-        self.model_name = model_name
+    def __init__(self, model_instance):
+        # 初始化时直接将外部传进来的实体大脑冻结在实例内部
+        self.model_instance = model_instance
 
+    @traceable(name="Tool_万能长线任务引擎触发")
     async def run_engine(
             self,
             goal: str,
@@ -111,8 +116,8 @@ class UniversalEngineTool:
                 context_text += f"\n--- 文件 [{fpath}] 内容 ---\n{file_content}\n"
 
         # 2. 启动外包流水线引擎 (复用 main.py 里的模型配置)
-        engine_model = get_llm_model(self.model_name)
-        engine = UniversalPlanExecuteEngine(model_instance=engine_model)
+        # 直接复用共享的实体大脑
+        engine = UniversalPlanExecuteEngine(model_instance=self.model_instance)
 
         # 3. 阻塞等待流水线跑完
         results = await engine.run(goal=goal, context=context_text, predefined_steps=predefined_steps)
@@ -156,11 +161,20 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
         "2. 只有当用户明确提出需要查看文件、列目录、查询 CSV、读取 Word、检索本地知识库、保存结果、修改文件等任务时，才允许调用工具。\n"
         "3. 不要根据示例、系统提示词、历史任务或自己的猜测编造文件夹/文件名。用户没有明确给路径时，先询问用户提供路径。\n"
         "4. 如果工具返回文件或文件夹不存在，最多再尝试一次合理的路径修正；仍失败时必须停止工具调用，并向用户说明需要确认路径。\n\n"
+        "\n【核心调用守则】\n"
+        "你不能直接调用上述工具的名称！你拥有的唯一可用函数是 `call_mcp_tool`。\n"
+        "例如当你要列出文件时，必须这样调用：\n"
+        "call_mcp_tool(tool_name='get_file_names', arguments={'folder_path': 'test/1'})\n"
     )
     for tool in mcp_tools:
+        # schema = getattr(tool, "input_schema", getattr(tool, "inputSchema", {}))
+        schema = getattr(tool, "input_schema", {})
+        # tools_instruction += f"- 名称: {tool.name}\n"
+        # tools_instruction += f"  描述: {tool.description}\n"
+        # tools_instruction += f"  参数格式: {json.dumps(tool.inputSchema, ensure_ascii=False)}\n\n"
         tools_instruction += f"- 名称: {tool.name}\n"
         tools_instruction += f"  描述: {tool.description}\n"
-        tools_instruction += f"  参数格式: {json.dumps(tool.inputSchema, ensure_ascii=False)}\n\n"
+        tools_instruction += f"  参数格式: {json.dumps(schema, ensure_ascii=False)}\n\n"
     tools_instruction += "请调用 `call_mcp_tool` 函数来使用上述工具。"
 
     # 🌟 系统提示词 (System Prompt) 策略
@@ -172,15 +186,18 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
     # 3. 生产对讲机
     my_custom_tool = make_mcp_tool(session)
 
+    # 统一生产大脑实例（单例模式思想）
+    shared_llm_model = get_llm_model(model_name)
+
     # 实例化 OOP 版本的万能引擎，并将其方法提取为 Tool
-    engine_instance = UniversalEngineTool(model_name)
+    engine_instance = UniversalEngineTool(shared_llm_model)
     heavy_engine_tool = Tool(engine_instance.run_engine)
 
     sys_logger.info(f"🚀 [Agent组装完毕] 引擎挂载成功，即将进入对话循环。")
 
     # 4. 组装并返回 Agent
     return Agent(
-        get_llm_model(model_name),
+        shared_llm_model,  # 主 Agent 也复用这个共享大脑
         system_prompt=final_system_prompt,
         tools=[my_custom_tool, heavy_engine_tool],
         output_type=str,  # 锁定输出结构

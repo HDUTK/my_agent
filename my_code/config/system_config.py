@@ -20,7 +20,6 @@ USE_LOCAL_MODEL = False  # True 代表使用本地 Ollama，False 代表使用�
 # 你的可用库存: 'deepseek-r1', 'gemma3', 'gemma4', 'qwen2.5-coder', 'qwen3'
 LOCAL_MODEL_NAME = "qwen3" # 当前选中的本地模型
 
-
 # 调用远程云端的大模型
 # Gemini/GPT/Qwen/Zhipu/Hunyuan（超时）/Spark（没有key）
 REMOTE_MODEL_NAME: str = "Qwen"

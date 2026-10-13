@@ -14,11 +14,56 @@ from config.agent_config import LLM_CONFIG
 from config.system_config import USE_LOCAL_MODEL, LOCAL_MODEL_NAME
 from utils.logger_print import sys_logger
 
+import json
+import httpx
 import os
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
+
+import os
+import json
+import httpx
+from pydantic_ai.models.ollama import OllamaModel
+from pydantic_ai.providers.ollama import OllamaProvider
+from config.system_config import USE_LOCAL_MODEL, LOCAL_MODEL_NAME
+from utils.logger_print import sys_logger
+
+
+# ==========================================
+# 🌟 本地传输过滤器：拦截并修复 Ollama 的 <nil> 崩溃
+# ==========================================
+class OllamaNilFixTransport(httpx.AsyncHTTPTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        # 仅拦截 POST 请求（大模型推理/对话请求）
+        if request.method == "POST":
+            try:
+                body = await request.aread()
+                if body:
+                    payload = json.loads(body.decode("utf-8"))
+                    if isinstance(payload, dict) and "messages" in payload and isinstance(payload["messages"], list):
+                        modified = False
+                        for msg in payload["messages"]:
+                            # 核心修复：将 content 为 None (null) 的项替换为空字符串 ""
+                            if isinstance(msg, dict) and msg.get("content") is None:
+                                msg["content"] = ""
+                                modified = True
+
+                        if modified:
+                            new_body = json.dumps(payload).encode("utf-8")
+                            headers = dict(request.headers)
+                            headers["content-length"] = str(len(new_body))
+                            request = httpx.Request(
+                                method=request.method,
+                                url=request.url,
+                                headers=headers,
+                                content=new_body,
+                                extensions=request.extensions
+                            )
+            except Exception:
+                pass
+        return await super().handle_async_request(request)
 
 
 # ==========================================
@@ -49,8 +94,11 @@ def get_llm_model(platform: str):
         model_name = local_model_config["ollama_name"]
         sys_logger.info(f"✅ [模型锻造厂] 成功装载 本地模型: {model_name}")
 
+        # 🌟 挂载自定义传输层，专治 invalid message content type: <nil>
+        patched_client = httpx.AsyncClient(transport=OllamaNilFixTransport())
+
         return OllamaModel(model_name,
-                           provider=OllamaProvider(base_url=OLLAMA_BASE_URL))
+                           provider=OllamaProvider(base_url=OLLAMA_BASE_URL, http_client=patched_client))
 
     else:
         platform = platform.lower()

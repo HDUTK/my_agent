@@ -309,7 +309,7 @@ if __name__ == "__main__":
     print_and_log("\n" + "=" * 50, "info")
     print_and_log("🚀 启动工具箱本地测试...", "info")
 
-    folder = "./test/1"  # 替换为你的文件夹路径
+    folder = "D:/PythonProject/AI_Agent/my_code/test/1"  # 替换文件夹路径
     names = get_file_names(folder)
     print_and_log(f"获取到的文件名列表: {names}", "info")
 

@@ -11,7 +11,8 @@ Target Python:  3.14 -> 3.12
 """
 
 import logging
-from mcp.server.fastmcp import FastMCP
+# from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 import inspect
 from core_tools import tools
 
@@ -24,7 +25,8 @@ logging.basicConfig(level=logging.WARNING)
 logging.getLogger("mcp").setLevel(logging.WARNING)
 
 # 1. 创建标准化 Server 实例
-mcp = FastMCP("my_server")
+# mcp = FastMCP("my_server")
+mcp = MCPServer("MyServer")
 
 # ==========================================
 # 🌟 在全局实例化大模型专家！
