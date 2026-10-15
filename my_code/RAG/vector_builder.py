@@ -46,21 +46,41 @@ def clear_vector_database():
     print_and_log("\n" + "⚠️" * 20, "warning")
     print_and_log(" 收到清空指令，正在准备销毁历史向量数据库...", "warning")
 
-    # 1. 释放 Chroma 单例引用并触发垃圾回收，解除 Windows 下的文件句柄占用
-    _CACHED_CHROMA_DB = None
-    gc.collect()
+    try:
+        # 1. 尝试使用 Chroma 原生方式删除并重置集合（优雅且无锁冲突）
+        vector_db = get_chroma_db()
+        vector_db.delete_collection()
+        print_and_log(f"🗑️ 已成功通过 Chroma 原生指令清除集合: [{COLLECTION_NAME}]", "info")
 
-    if os.path.exists(DB_PERSIST_PATH):
-        try:
-            # 采用 rmtree 进行最彻底的物理销毁
-            shutil.rmtree(DB_PERSIST_PATH)
-            print_and_log(f"🗑️ 已成功彻底删除历史数据库文件夹: {DB_PERSIST_PATH}", "info")
-        except Exception as e:
-            print_and_log(f"❌ 删除历史数据库失败 (请确认没有其他程序正在占用该文件夹): {e}", "error")
-    else:
-        print_and_log("ℹ️ 历史数据库不存在，无需清理，直接开始全新构建。", "info")
+        # 重置内存单例，促使下次自动重新生成新 Collection
+        _CACHED_CHROMA_DB = None
+        gc.collect()
+    except Exception as e:
+        print_and_log(f"⚠️ 原生重置异常，尝试物理级销毁: {e}", "warning")
+
+        # 2. 保底方案：显式停止底层系统线程并释放句柄
+        if _CACHED_CHROMA_DB is not None:
+            try:
+                # 显式关闭 Chroma 底层持久化系统与 SQLite 线程
+                _CACHED_CHROMA_DB._client._system.stop()
+            except Exception:
+                pass
+            _CACHED_CHROMA_DB = None
+            gc.collect()
+
+        if os.path.exists(DB_PERSIST_PATH):
+            try:
+                shutil.rmtree(DB_PERSIST_PATH)
+                print_and_log(f"🗑️ 已成功彻底删除历史数据库文件夹: {DB_PERSIST_PATH}", "info")
+            except Exception as err:
+                print_and_log(
+                    f"❌ 物理删除失败！请检查是否有其他终端（如 main.py 或 PyCharm Console）正在运行: {err}",
+                    "error"
+                )
 
     print_and_log("⚠️" * 20 + "\n", "warning")
+
+    return
 
 
 def generate_chunk_id(chunk: Document) -> str:
