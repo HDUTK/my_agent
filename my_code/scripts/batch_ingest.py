@@ -11,14 +11,13 @@ version: V1.0
 Target Python: 
 """
 
-
 import os
 from utils.logger_print import print_and_log
 
 # 引入三大核心组件
 from RAG.document_parser import read_any_file
 from RAG.chunk import intelligent_chunker
-from RAG.vector_builder import save_chunks_to_chroma, clear_vector_database
+from RAG.vector_builder import save_chunks_to_chroma, clear_vector_database, get_bge_embeddings, get_chroma_db
 
 
 # ==========================================
@@ -28,6 +27,25 @@ TARGET_FOLDER = r"D:/PythonProject/AI_Agent/knowledge_source"  # 替换为实际
 
 # 🌟 是否在入库前清空历史库？(True: 彻底重置 | False: 追加更新)
 CLEAR_OLD_DB = False
+
+
+def get_existing_sources(vector_db) -> set[str]:
+    """
+    🌟 从 ChromaDB 中提取所有已经入库的文件名（去重集合）
+    """
+    try:
+        # 只拉取元数据，不拉取向量和正文，耗时通常只需几毫秒
+        existing_data = vector_db.get(include=["metadatas"])
+        metadatas = existing_data.get("metadatas", [])
+
+        existing_sources = set()
+        for meta in metadatas:
+            if meta and "source" in meta:
+                existing_sources.add(meta["source"])
+        return existing_sources
+    except Exception as e:
+        print_and_log(f"⚠️ 读取已有库元数据失败 (若是初次建库请忽略): {e}", "warning")
+        return set()
 
 
 def batch_build_knowledge_base(folder_path: str):
@@ -46,6 +64,9 @@ def batch_build_knowledge_base(folder_path: str):
     # 获取文件夹下的所有文件, 使用 os.walk 递归扫描所有子文件夹
     all_file_paths = []
     for root, dirs, files in os.walk(folder_path):
+        # 🌟 遇到以 _marker_out 结尾的目录或隐藏目录，直接剪枝跳过，不向下递归
+        dirs[:] = [d for d in dirs if not d.endswith("_marker_out") and not d.startswith(".")]
+
         for file in files:
             # 拼出文件的完整绝对路径并收集起来
             all_file_paths.append(os.path.join(root, file))
@@ -56,18 +77,33 @@ def batch_build_knowledge_base(folder_path: str):
 
     print_and_log(f"📦 共发现 {len(all_file_paths)} 个待处理文件。开始执行流水线...\n", "info")
 
+    # 🌟 在进入批量循环之前，提前加载一次模型权重常驻显存
+    shared_embeddings = get_bge_embeddings()
+    vector_db = get_chroma_db(embeddings=shared_embeddings)
+
+    # 🌟 提取库中已有的文件名单
+    existing_files = get_existing_sources(vector_db)
+    print_and_log(f"📚 数据库现状: 当前已有 {len(existing_files)} 个文件的记录在库。", "info")
+
     success_count = 0
+    skipped_count = 0
     failed_count = 0
     total_chunks_saved = 0
 
-    # 开始循环处理每一个文件
     # 开始循环处理每一个文件
     for idx, file_path in enumerate(all_file_paths):
         # 从完整路径中提取出单纯的文件名，用来打日志
         file_name = os.path.basename(file_path)
         print_and_log(f"🔄 [{idx + 1}/{len(all_file_paths)}] 正在处理: {file_name} ...", "info")
 
+        # 🌟 增量拦截：若已入库，跳过解析与向量化
+        if file_name in existing_files:
+            print_and_log(f"  ⏭️ [跳过] 该文件之前已入库，跳过所有计算。", "info")
+            skipped_count += 1
+            continue
+
         try:
+            # 仅对新文件执行解析与入库
             # 第一阶段：解析提取文本
             raw_text = read_any_file(file_path)
             if raw_text.startswith("⚠️") or raw_text.startswith("["):
@@ -82,9 +118,11 @@ def batch_build_knowledge_base(folder_path: str):
                 failed_count += 1
                 continue
 
-            # 第三阶段：向量化入库
-            save_chunks_to_chroma(chunks)
+            # 第三阶段：向量化入库，把常驻显存的 shared_embeddings 传入，秒级计算特征向量
+            save_chunks_to_chroma(chunks, embeddings=shared_embeddings)
 
+            # 新文件入库成功后，将其加入已入库集合
+            existing_files.add(file_name)
             success_count += 1
             total_chunks_saved += len(chunks)
             print_and_log(f"  ✅ {file_name} 处理完成！(生成 {len(chunks)} 个碎片)\n", "info")

@@ -35,7 +35,7 @@ class LocalKnowledgeExpert:
             message = "⚠️ [系统提示]：本地数据库中未检索到任何与此问题相关的记录。请使用你的知识进行回答，并向用户明确说明：本地知识库无相关记录。"
             sys_logger.info(message)
             return message
-
+    
         # 把捞出来的原文拼在一起
         result_text = "【以下是本地数据库检索到的参考资料】\n"
         for i, doc in enumerate(best_docs):

@@ -44,15 +44,30 @@ def chunk_markdown_or_text(text: str, source_file: str) -> list[Document]:
         separators=CHUNK_CONFIG["markdown_or_text"]["SEPARATOR"]
     )
 
-    chunks = text_splitter.split_documents(md_splits)
+    raw_chunks = text_splitter.split_documents(md_splits)
 
-    # 3. 补充基础 Metadata
-    for i, chunk in enumerate(chunks):
+    enhanced_chunks = []
+    for i, chunk in enumerate(raw_chunks):
+        # 🌟 1. 组装标题路径
+        headers = [
+            chunk.metadata.get("Header_1"),
+            chunk.metadata.get("Header_2"),
+            chunk.metadata.get("Header_3")
+        ]
+        valid_headers = [h for h in headers if h]
+        breadcrumb = " > ".join(valid_headers) if valid_headers else "正文片段"
+
+        # 🌟 2. 注入上下文前缀，大幅强化 BGE 语义与 BM25 词频匹配
+        context_prefix = f"【文档: {source_file} | 章节: {breadcrumb}】\n"
+        chunk.page_content = context_prefix + chunk.page_content
+
         chunk.metadata["source"] = source_file
         chunk.metadata["chunk_index"] = i
         chunk.metadata["data_type"] = "natural_language"
+        enhanced_chunks.append(chunk)
 
-    return chunks
+    # return chunks
+    return enhanced_chunks
 
 
 def chunk_spreadsheet(text: str, source_file: str) -> list[Document]:

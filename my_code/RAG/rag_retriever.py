@@ -10,6 +10,9 @@ version: V1.0
 Target Python: 
 """
 
+import jieba
+import numpy as np
+
 from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
 from config.agent_config import MODEL_REGISTRY
 from utils.core_utils import apply_model_environment
@@ -68,7 +71,13 @@ class HybridRerankRetriever:
 
         # 极其关键：对文本进行基础切分（按字/词切分），以便 BM25 计算频率
         # 关于中文字符，最简单的做法就是直接变成一个个单独的字列表
-        tokenized_corpus = [list(doc.page_content) for doc in self.all_documents]
+        # tokenized_corpus = [list(doc.page_content) for doc in self.all_documents]
+        # self.bm25 = BM25Okapi(tokenized_corpus)
+        # 1构建 BM25 语料库时使用 jieba 分词
+        tokenized_corpus = [
+            list(jieba.cut_for_search(doc.page_content))
+            for doc in self.all_documents
+        ]
         self.bm25 = BM25Okapi(tokenized_corpus)
 
         # 4. 初始化终极总监：加载 BGE-Reranker-v2-m3 重排模型
@@ -79,7 +88,7 @@ class HybridRerankRetriever:
         sys_logger.info(" 混合检索与重排引擎全部就绪！你可以开始精准大海捞针了！")
         sys_logger.info("=" * 50 + "\n")
 
-    def search(self, query: str, score_threshold: float = 0.0, top_k: int = 2) -> list[Document]:
+    def search(self, query: str, score_threshold: float = 0.0, top_k: int = 3) -> list[Document]:
         """
         核心搜寻函数：经历【向量找 15个】 + 【关键词找 10个】 -> 【合并去重】 -> 【重排】 -> 【截取前k个】
         """
@@ -91,8 +100,9 @@ class HybridRerankRetriever:
         sys_logger.info(f"  -> [左路向量] 成功初筛出 {len(dense_results)} 条语义相关文档。")
 
         # ------------ 【第二步：右路关键词初筛】 ------------
-        # 将问题也切成字的列表，丢给 BM25 算法去算分
-        tokenized_query = list(query)
+        # 将问题也切成字的列表，丢给 BM25 算法去算分，使用 jieba 切词代替单字 list(query)
+        # tokenized_query = list(query)
+        tokenized_query = list(jieba.cut_for_search(query))
         # 获取最形似的前 y 条结果
         sparse_results = self.bm25.get_top_n(tokenized_query, self.all_documents, n=MODEL_REGISTRY["BM25_search_number"])
         sys_logger.info(f"  -> [右路关键词] 成功初筛出 {len(sparse_results)} 条字面精准文档。")
@@ -105,7 +115,8 @@ class HybridRerankRetriever:
         for doc in all_candidates:
             unique_candidates_dict[doc.page_content] = doc
 
-        candidates = list(unique_candidates_dict.values())
+        # candidates = list(unique_candidates_dict.values())
+        candidates: list[Document] = list(unique_candidates_dict.values())
         sys_logger.info(f"  -> [合并去重] 双路会师完成，剔除重复项后，共有 {len(candidates)} 篇文档进入重排总决赛。")
 
         if not candidates:
@@ -118,11 +129,17 @@ class HybridRerankRetriever:
         pairs = [[query, doc.page_content] for doc in candidates]
 
         # 显卡全速运转，直接预测出所有候选人的真实得分（返回一个包含浮点数的列表）
-        scores = self.reranker.predict(pairs)
+        # scores = self.reranker.predict(pairs)
+        # # 将分数绑定到 Document 的元数据（metadata）中，方便后面查看
+        # for idx, score in enumerate(scores):
+        #     candidates[idx].metadata["rerank_score"] = float(score)
+        raw_scores = self.reranker.predict(pairs)
 
-        # 将分数绑定到 Document 的元数据（metadata）中，方便后面查看
-        for idx, score in enumerate(scores):
-            candidates[idx].metadata["rerank_score"] = float(score)
+        # 🌟 映射到 0~1 的标准置信度概率
+        normalized_scores: list[float] = (1 / (1 + np.exp(-np.array(raw_scores)))).tolist()
+
+        for doc, score in zip(candidates, normalized_scores):
+            doc.metadata["rerank_score"] = float(score)
 
         # 根据重排分数，从大到小（降序）重新排列整支队伍
         candidates.sort(key=lambda x: x.metadata["rerank_score"], reverse=True)

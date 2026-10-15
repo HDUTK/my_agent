@@ -13,6 +13,7 @@ Target Python: 3.12
 """
 
 import os
+import gc
 import hashlib
 import shutil
 
@@ -30,12 +31,24 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 
+# ----------------------------------------------------
+# 🌟 模块级全局单例句柄：Embedding 模型与 Chroma 数据库连接
+# ----------------------------------------------------
+_CACHED_EMBEDDINGS = None
+_CACHED_CHROMA_DB = None
+
+
 def clear_vector_database():
     """
     🌟 物理级清空本地向量数据库
     """
+    global _CACHED_CHROMA_DB
     print_and_log("\n" + "⚠️" * 20, "warning")
     print_and_log(" 收到清空指令，正在准备销毁历史向量数据库...", "warning")
+
+    # 1. 释放 Chroma 单例引用并触发垃圾回收，解除 Windows 下的文件句柄占用
+    _CACHED_CHROMA_DB = None
+    gc.collect()
 
     if os.path.exists(DB_PERSIST_PATH):
         try:
@@ -72,6 +85,10 @@ def get_bge_embeddings():
     🌟 加载智源最新一代 BGE-M3 多语言/长文本向量模型 (纯本地运行)
     首次运行会自动去镜像源下载约 2.2GB 的模型权重，之后永久本地秒加载。
     """
+    global _CACHED_EMBEDDINGS
+    if _CACHED_EMBEDDINGS is not None:
+        return _CACHED_EMBEDDINGS
+
     print_and_log(" 正在加载 " + MODEL_REGISTRY['bge_m3']['model_name'] + "  顶级向量模型引擎...", "info")
 
     # 🌟 模型名称 bge-m3
@@ -83,18 +100,39 @@ def get_bge_embeddings():
     # normalize_embeddings=True 依然极其重要！确保余弦相似度的准确计算
     encode_kwargs = {'normalize_embeddings': True}
 
-    embeddings = HuggingFaceEmbeddings(
+    _CACHED_EMBEDDINGS = HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs=model_kwargs,
         encode_kwargs=encode_kwargs
     )
     print_and_log(MODEL_REGISTRY['bge_m3']['model_name'] + " 模型加载完毕！", "info")
-    return embeddings
+    return _CACHED_EMBEDDINGS
 
 
-def save_chunks_to_chroma(chunks: list[Document]):
+def get_chroma_db(embeddings=None) -> Chroma:
+    """
+    🌟 获取 ChromaDB 客户端单例
+    保持 SQLite 引擎与 HNSW 索引句柄常驻，避免每个文件处理时反复重复挂载与 I/O 校验。
+    """
+    global _CACHED_CHROMA_DB
+    if _CACHED_CHROMA_DB is not None:
+        return _CACHED_CHROMA_DB
+
+    if embeddings is None:
+        embeddings = get_bge_embeddings()
+
+    _CACHED_CHROMA_DB = Chroma(
+        persist_directory=DB_PERSIST_PATH,
+        embedding_function=embeddings,
+        collection_name=COLLECTION_NAME
+    )
+    return _CACHED_CHROMA_DB
+
+
+def save_chunks_to_chroma(chunks: list[Document], embeddings=None):
     """
     将切分好的纸条 (Chunks) 连同它们的标签 (Metadata) 一起变成坐标，存入指定路径的 ChromaDB
+    支持接收外部预热好的 embeddings 实例，避免重复创建连接。
     """
     if not chunks:
         print_and_log("⚠️ 传入的 Chunks 为空，无法入库。", "warning")
@@ -103,26 +141,64 @@ def save_chunks_to_chroma(chunks: list[Document]):
     print_and_log(f"📦 准备将 {len(chunks)} 个 Chunk 进行向量化并存入 ChromaDB...", "info")
     print_and_log(f"📁 目标存储路径: {DB_PERSIST_PATH}", "info")
 
-    # 🌟 批量为所有纸条生成固定的数字指纹 ID
-    chunk_ids = [generate_chunk_id(chunk) for chunk in chunks]
-    print_and_log(f"🔑 已生成固定唯一哈希 ID，启动防重复入库 (Upsert 机制)...", "info")
+    # 🌟 批内清洗与基于 MD5 的精准去重
+    unique_chunks = []
+    unique_chunk_ids = []
+    seen_ids = set()
+    filtered_empty_count = 0
 
-    # 1. 唤醒模型
-    embeddings = get_bge_embeddings()
+    # # 🌟 批量为所有纸条生成固定的数字指纹 ID
+    # chunk_ids = [generate_chunk_id(chunk) for chunk in chunks]
+    # print_and_log(f"🔑 已生成固定唯一哈希 ID，启动防重复入库 (Upsert 机制)...", "info")
+    #
+    # # 1. 获取常驻的 Chroma 客户端
+    # vector_db = get_chroma_db(embeddings=embeddings)
+    #
+    # # 2. 核心入库指令！
+    # # Chroma.from_documents 会做两件事：
+    # # ① 遍历所有的 chunk，让 BGE 模型把文字算成向量。
+    # # ② 把文字、标签、向量打包存入 persist_directory 指定的本地文件夹中。
+    # # 调用 add_documents 增量追加，不重建客户端
+    # vector_db.add_documents(documents=chunks, ids=chunk_ids)
+    #
+    # print_and_log("🎉 恭喜！所有数据已成功向量化并持久化入库！", "info")
+    # return vector_db
 
-    # 2. 核心入库指令！
-    # Chroma.from_documents 会做两件事：
-    # ① 遍历所有的 chunk，让 BGE 模型把文字算成向量。
-    # ② 把文字、标签、向量打包存入 persist_directory 指定的本地文件夹中。
-    vector_db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        ids=chunk_ids,
-        persist_directory=DB_PERSIST_PATH,
-        collection_name=COLLECTION_NAME
-    )
+    for chunk in chunks:
+        # 1. 过滤纯空白或换行符构成的无意义脏切片
+        if not chunk.page_content or not chunk.page_content.strip():
+            filtered_empty_count += 1
+            continue
 
-    print_and_log("🎉 恭喜！所有数据已成功向量化并持久化入库！", "info")
+        chunk_id = generate_chunk_id(chunk)
+
+        # 2. 拦截同一文档内内容完全相同的重复切片（如重复的页眉、页脚、表头）
+        if chunk_id in seen_ids:
+            continue
+
+        seen_ids.add(chunk_id)
+        unique_chunks.append(chunk)
+        unique_chunk_ids.append(chunk_id)
+
+    # 打印去重与清洗结果
+    duplicate_count = len(chunks) - len(unique_chunks) - filtered_empty_count
+    if duplicate_count > 0 or filtered_empty_count > 0:
+        print_and_log(
+            f"🧹 [数据清洗] 自动剔除同文档内重复切片: {duplicate_count} 个，空切片: {filtered_empty_count} 个",
+            "info"
+        )
+
+    if not unique_chunks:
+        print_and_log("⚠️ 经过清洗后无有效切片可入库。", "warning")
+        return None
+
+    print_and_log(f"🔑 实际入库有效独立切片数: {len(unique_chunks)} 个，正在写入向量库...", "info")
+
+    # 3. 获取常驻客户端并安全追加
+    vector_db = get_chroma_db(embeddings=embeddings)
+    vector_db.add_documents(documents=unique_chunks, ids=unique_chunk_ids)
+
+    print_and_log("🎉 当前批次数据已成功向量化并追加持久化入库！", "info")
     return vector_db
 
 
@@ -133,15 +209,8 @@ def query_chroma_db(query_text: str, top_k: int = 3):
     """
     print_and_log(f"\n🔍 正在检索问题: '{query_text}'", "info")
 
-    # 唤醒模型（把问题也变成坐标）
-    embeddings = get_bge_embeddings()
-
-    # 连接到我们之前建好的本地数据库
-    vector_db = Chroma(
-        persist_directory=DB_PERSIST_PATH,
-        embedding_function=embeddings,
-        collection_name=COLLECTION_NAME
-    )
+    # 复用已初始化的客户端单例，不再重复读盘建立连接
+    vector_db = get_chroma_db()
 
     # 执行余弦相似度检索，找回最相似的前 top_k 个结果
     results = vector_db.similarity_search_with_score(query_text, k=top_k)

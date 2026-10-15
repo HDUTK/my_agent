@@ -58,10 +58,10 @@ def parse_pdf(file_path: str) -> str:
         # 在源 PDF 同级目录下生成一个 _marker_out 的文件夹
         output_dir = os.path.join(os.path.dirname(abs_file_path), f"{base_name}_marker_out")
 
-        # 如果之前解析过，先清理旧文件夹，防止数据污染
-        if os.path.exists(output_dir):
-            shutil.rmtree(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
+        # # 如果之前解析过，先清理旧文件夹，防止数据污染
+        # if os.path.exists(output_dir):
+        #     shutil.rmtree(output_dir)
+        # os.makedirs(output_dir, exist_ok=True)
 
         sys_logger.info(
             f"\n👁 [视觉解析启动] 正在后台启动 Marker 分析文档: {base_name}.pdf ... (若是首次运行将自动下载模型权重，请耐心等待)")
@@ -123,6 +123,15 @@ def parse_pdf(file_path: str) -> str:
         msg = f"[视觉PDF解析错误]: {str(e)}"
         sys_logger.error(msg)
         return msg
+
+    finally:
+        # 🌟 核心修改：无论解析成功与否，只要创建了临时目录，用完立即彻底销毁
+        if output_dir and os.path.exists(output_dir):
+            try:
+                shutil.rmtree(output_dir, ignore_errors=True)
+                sys_logger.info(f"🧹 [临时缓存清理] 已自动删除临时生成目录: {os.path.basename(output_dir)}")
+            except Exception as e:
+                sys_logger.warning(f"⚠️ [临时缓存清理失败]: {e}")
 
 
 def parse_docx(file_path: str) -> str:
