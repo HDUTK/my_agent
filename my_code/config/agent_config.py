@@ -84,7 +84,7 @@ LLM_CONFIG = {
 # RAG相关
 # ==========================================
 # RAG 检索参数：返回相关度最大的K个结果
-RETRIEVER_TOP_K = 3
+RETRIEVER_TOP_K = 4
 # RAG 检索参数：返回相关度必须要大于这个threshold（0-1）
 RERANK_THRESHOLD = 0.30
 # PDF文档解析时超时限制 (目前超时设为 600 秒)

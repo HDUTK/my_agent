@@ -24,8 +24,8 @@ LOCAL_MODEL_NAME = "qwen3" # 当前选中的本地模型
 # Gemini/GPT/Qwen/Zhipu/Hunyuan（超时）/Spark（没有key）
 REMOTE_MODEL_NAME: str = "Qwen"
 # 使用的System Prompts
-# default_chat/a63_sensor/code_review/paper_review
-my_scenario_name: str = "paper_review"
+# default_chat/a63_sensor/code_review/complex_task
+my_scenario_name: str = "complex_task"
 
 # 自动定位当前项目的根目录 (AI_Agent_Project)
 # __file__ 是当前文件，parent 是 config 文件夹，parent.parent 就是项目根目录
@@ -52,3 +52,23 @@ LOG_CONFIG = {
 
 # cpu/cuda
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# =========================================================================
+# 🌟 RAG 作为工具的 DOCSTRING：从同目录下的 rag_tool_docstring.md 动态读取
+# =========================================================================
+RAG_DOC_FILE = Path(__file__).resolve().parent / "rag_tool_docstring.md"
+
+def load_rag_tool_docstring() -> str:
+    """从外部 Markdown 文件动态加载 RAG 说明书，带异常与缺失防御"""
+    if not RAG_DOC_FILE.exists():
+        # 防呆兜底：如果外部 md 文件丢失，返回基础说明，防止启动抛异常崩溃
+        return "【本地核心专业知识库检索工具】用于检索云冈石窟项目相关内容、博士资料和博士学术论文等本地资料。"
+
+    try:
+        return RAG_DOC_FILE.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        print(f"⚠️ [配置警告] 读取 {RAG_DOC_FILE.name} 失败: {e}，将启用简短兜底说明。")
+        return "【本地核心专业知识库检索工具】用于检索本地专业知识库资料。"
+
+# 对外暴露的常量：保持原变量名不变，mcp_server.py 等其他模块无需做任何修改
+RAG_TOOL_DOCSTRING = load_rag_tool_docstring()
