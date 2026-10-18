@@ -23,7 +23,6 @@ from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
-from typing import Any, Optional
 
 # 导入mcp客户端组件
 from mcp.client.stdio import stdio_client, StdioServerParameters

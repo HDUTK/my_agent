@@ -15,9 +15,7 @@ version: V1.0
 Target Python: 
 """
 
-import os
 from collections import Counter
-from utils.logger_print import print_and_log
 from RAG.vector_builder import get_chroma_db, clear_vector_database
 
 

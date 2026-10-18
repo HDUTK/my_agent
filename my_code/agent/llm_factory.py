@@ -11,16 +11,8 @@ Target Python:  3.14 -> 3.12
 """
 
 from config.agent_config import LLM_CONFIG
-from config.system_config import USE_LOCAL_MODEL, LOCAL_MODEL_NAME
-from utils.logger_print import sys_logger
-
-import json
-import httpx
-import os
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.models.ollama import OllamaModel
-from pydantic_ai.providers.ollama import OllamaProvider
 
 import os
 import json

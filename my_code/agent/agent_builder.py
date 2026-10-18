@@ -12,7 +12,6 @@ Target Python:  3.14 -> 3.12
 
 import os
 import json
-import docx
 from typing import Dict, Any, Optional
 
 from pydantic_ai import Agent, Tool
