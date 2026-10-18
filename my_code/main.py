@@ -23,17 +23,27 @@ from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
+from typing import Any, Optional
 
 # 导入mcp客户端组件
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
+# 层级记忆管理组件导入
+from utils.memory_manager import (
+    FactStore,                       # 第 3 层: 长期事实档案库 (策略 3 本地可读写 JSON)
+    FastFactGatekeeper,              # 第 3 层: 策略 1 毫秒级正则门禁 (0 Token 拦截)
+    RollingSummaryMemory,            # 第 2 层: 滚动会话摘要 + 策略 2 顺风车事实打捞
+    extract_facts_instantaneously    # 策略 1 即时执行器
+)
+
 # 导入其他的模块
-from utils.core_utils import trim_history
+from utils.memory_manager import trim_history
 from agent.agent_builder import build_agent_with_mcp
-from utils.logger_print import sys_logger, print_and_log
+from utils.logger_print import print_and_log
 # 配置
-from config.system_config import USE_LOCAL_MODEL, LOCAL_MODEL_NAME, REMOTE_MODEL_NAME, my_scenario_name
+from config.system_config import (USE_LOCAL_MODEL, LOCAL_MODEL_NAME, REMOTE_MODEL_NAME,
+                                  my_scenario_name, MEMORY_CONFIG)
 from config.agent_config import LLM_CONFIG
 
 # langsmith监控
@@ -129,8 +139,15 @@ async def process_single_turn(agent: Agent, user_input: str, history: list) -> l
 # ==========================================
 # 用户交互界面
 # ==========================================
-async def run_chat_loop(agent: Agent):
-    """控制台聊天引擎：只负责跟用户互动"""
+async def run_chat_loop(agent: Agent,
+    memory_mgr: RollingSummaryMemory,
+    fact_store: Optional[FactStore],
+    gatekeeper: FastFactGatekeeper,
+    summary_llm: Any):
+    """
+    控制台交互主引擎：
+    在每轮交互中，协同调度【正则门禁】、【顺风车摘要】与【主 Agent 对话】
+    """
     print_and_log("\n" + "═" * 50, "info")
 
     if USE_LOCAL_MODEL:
@@ -138,33 +155,37 @@ async def run_chat_loop(agent: Agent):
     else:
         print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['remote'][REMOTE_MODEL_NAME.lower()]['type']}", "info")
 
-    # 如果你的场景变量名不叫 scenario_name，请换成你实际传递给 agent_builder 的那个变量
-    print_and_log(f"🎭 [当前人设 (System Prompt)]: {my_scenario_name}", "info")
+    # 如果场景变量名不叫 scenario_name，请换成实际传递给 agent_builder 的那个变量
+    print_and_log(f"🎭 [当前场景 (System Prompt)]: {my_scenario_name}", "info")
+    if fact_store and fact_store.facts:
+        print_and_log(f"📚 [事实档案]: 已成功加载本地长期记忆库 ({fact_store.file_path.name})", "info")
     print_and_log("═" * 50, "info")
 
     print_and_log("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。", "info")
+
     history = []
 
     while True:
         user_input = await asyncio.to_thread(input, "\n输入：")
+        cleaned_input = user_input.strip()
 
-        if user_input.strip().lower() == 'exit':
+        if cleaned_input.strip().lower() == 'exit':
             print_and_log("👋 Agent 已退出。", "info")
             sys_logger.info("-" * 50)
             sys_logger.info("\n" * 5)
             break
 
-        if not user_input.strip():
+        if not cleaned_input.strip():
             continue
 
-        # 🌟 每次提问前，先对历史记忆进行安全截断（保留最近 max_messages 条有价值的信息）
-        history = trim_history(history, max_messages=LLM_CONFIG["history_max_messages"])
+        # 🌟【核心简化点】：1 行代码解决所有门禁、抽取、排雷、剪枝与滚动摘要
+        clean_history = await memory_mgr.prepare_turn_context(cleaned_input, history)
 
-        # print(f"🧹 (当前记忆长度: {len(history)} 条)")
-
-        # 🌟 将输入交给监控函数处理，并接收新的记忆
-        # noinspection PyUnresolvedReferences
-        history = await process_single_turn(agent, user_input, history)
+        # -----------------------------------------------------------------
+        # 🌟 主对话推理: 大模型只接收预算内的干净短期历史
+        # （而长期事实和滚动前情提要，已由 agent_builder 中的动态钩子自动注入到了 System Prompt）
+        # -----------------------------------------------------------------
+        history = await process_single_turn(agent, cleaned_input, clean_history)
 
         print("-" * 50)
 

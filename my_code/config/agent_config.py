@@ -76,8 +76,7 @@ LLM_CONFIG = {
             },
         }
     },
-    "input_max_tokens": 3000,  # 限制大模型最多生成 3000 个 Token (防废话，防破产)
-    "history_max_messages": 6,  # 每次提问前，先对历史记忆进行安全截断,保留最近 max_messages 条信息
+    "input_max_tokens": 4000,  # 限制大模型最多生成 3000 个 Token (防废话，防破产)
 }
 
 # ==========================================

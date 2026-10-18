@@ -11,65 +11,11 @@ Target Python:  3.14 -> 3.12
 """
 
 import os
-import copy
 import warnings
-from typing import List, Any
 
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelRequest,
-    ModelResponse,
-    ToolReturnPart,
-    UserPromptPart,
-    TextPart,
-    ToolCallPart
-)
 from config.system_config import PROMPTS_DIR
 from config.agent_config import MODEL_REGISTRY
 from utils.logger_print import sys_logger
-
-
-# ==========================================
-# 🌟 Token 估算器初始化 (优先使用 tiktoken，缺失时平滑降级)
-# ==========================================
-try:
-    import tiktoken
-    # 使用与主流大模型 (GPT-4 / Qwen / Claude 兼容端点) 对齐的 cl100k_base 编码
-    _ENCODER = tiktoken.get_encoding("cl100k_base")
-
-    def count_string_tokens(text: str) -> int:
-        if not text:
-            return 0
-        return len(_ENCODER.encode(str(text), disallowed_special=()))
-except ImportError:
-    # 优雅降级：若未安装 tiktoken，按中英文混合经验公式估算 (1 token ≈ 1.2 字符)
-    def count_string_tokens(text: str) -> int:
-        if not text:
-            return 0
-        return int(len(str(text)) * 0.8) + 1
-
-
-def estimate_message_tokens(message: Any) -> int:
-    """估算单条 Pydantic-AI 消息所占用的 Token 数量"""
-    total_text = []
-
-    # 1. 获取消息内包含的所有部件 (parts)
-    parts = getattr(message, "parts", [])
-    for part in parts:
-        # 如果是用户提问、大模型回复或工具返回值，提取它的文本内容
-        if hasattr(part, "content") and part.content:
-            total_text.append(str(part.content))
-        # 如果是大模型发起的工具调用指令，提取它的参数字典 (args)
-        if hasattr(part, "args") and part.args:
-            total_text.append(str(part.args))
-
-    # 2. 把拆出来的所有文本拼在一起，送去计算 Token
-    full_payload = "".join(total_text)
-    # 基础消息开销预留 4 个 Token,
-    # 主流大模型在底层传输消息时，每条消息前后都会包裹几位固定的协议元数据标记（ChatML 格式）
-    # 这些协议标记（角色名、起始符、结束符、换行符）本身固定占用 3 ~ 4 个 Token
-    return count_string_tokens(full_payload) + 4
-
 
 
 # ==========================================
@@ -86,43 +32,6 @@ def load_prompt(scenario_name: str) -> str:
     except FileNotFoundError:
         sys_logger.warning(f"[Prompt 缺失] 找不到文件 {file_path}，已强制降级使用默认兜底提示词！")
         return "你是一个有用的人工智能助手。"  # 找不到文件时的默认兜底
-
-
-# ==========================================
-# 安全截断历史记忆 (滑动窗口)
-# ==========================================
-def trim_history(history: list, max_messages: int = 6) -> list:
-    """
-    像外科手术一样精准截断历史记录。
-    不仅限制长度，还能避开“切断工具调用链”的致命雷区。
-    """
-    if len(history) <= max_messages:
-        return history
-
-    # 1. 粗略切取最后 max_messages 条
-    trimmed = history[-max_messages:]
-
-    # 2. 精密排雷：确保切下来的第一条消息是纯净的、由用户发起的问题
-    while trimmed:
-        first_msg = trimmed[0]
-        is_invalid_start = False
-
-        # 雷区 A：如果开头第一条是模型生成的回复（ModelResponse），逻辑断裂
-        if isinstance(first_msg, ModelResponse):
-            is_invalid_start = True
-
-        # 雷区 B：如果开头第一条包含了工具执行的返回结果（ToolReturnPart），说明大模型请求工具的那句话被切没了，逻辑断裂
-        elif isinstance(first_msg, ModelRequest):
-            if any(isinstance(part, ToolReturnPart) for part in first_msg.parts):
-                is_invalid_start = True
-
-        # 如果踩雷，就把这条残缺的记忆扔掉，往后找下一条，直到找到安全的起点
-        if is_invalid_start:
-            trimmed.pop(0)
-        else:
-            break
-
-    return trimmed
 
 
 # ==========================================

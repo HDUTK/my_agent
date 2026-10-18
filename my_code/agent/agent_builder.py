@@ -13,7 +13,7 @@ Target Python:  3.14 -> 3.12
 import os
 import json
 import docx
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from pydantic_ai import Agent, Tool
 from pydantic_ai.exceptions import ModelRetry
@@ -23,6 +23,7 @@ from mcp.client.session import ClientSession
 from agent.agent_engine_2 import UniversalPlanExecuteEngine
 
 from agent.llm_factory import get_llm_model
+from utils.memory_manager import FactStore
 from utils.core_utils import load_prompt
 from RAG.document_parser import read_any_file
 from utils.logger_print import sys_logger
@@ -140,8 +141,12 @@ class UniversalEngineTool:
 # ==========================================
 # Agent 装配流水线
 # ==========================================
-async def build_agent_with_mcp(session: ClientSession, model_name:str,
-                               scenario_name: str = "default_chat") -> Agent[Any, str]:
+async def build_agent_with_mcp(session: ClientSession,
+                               model_name:str,
+                               scenario_name: str = "default_chat",
+                               memory_manager: Any = None,
+                               fact_store: Optional[FactStore] = None
+                               ) -> Agent[Any, str]:
     """
     Agent 装配厂：负责找 Server 要工具列表，写说明书，最后把大脑和工具组装成 Agent
     """
@@ -193,13 +198,44 @@ async def build_agent_with_mcp(session: ClientSession, model_name:str,
     engine_instance = UniversalEngineTool(shared_llm_model)
     heavy_engine_tool = Tool(engine_instance.run_engine)
 
-    sys_logger.info(f"🚀 [Agent组装完毕] 引擎挂载成功，即将进入对话循环。")
-
-    # 4. 组装并返回 Agent
-    return Agent(
+    agent = Agent(
         shared_llm_model,  # 主 Agent 也复用这个共享大脑
         system_prompt=final_system_prompt,
         tools=[my_custom_tool, heavy_engine_tool],
         output_type=str,  # 锁定输出结构
         retries=3  # 允许工具调用失败后最多重试 3 次，额度用完直接停止
     )
+
+    # 步骤 5： 挂载动态记忆注入钩子
+    @agent.system_prompt
+    def inject_dynamic_memory() -> str:
+        """
+        每次大模型推理前自动执行：
+        优先从 UnifiedMemoryManager 一键提取【长期事实档案】与【滚动会话摘要】。
+        """
+        if not memory_manager:
+            return ""
+
+        # 方式 A：如果传入的是统一记忆总管 (UnifiedMemoryManager)，直接调用封装接口
+        if hasattr(memory_manager, "get_system_prompt_injection"):
+            return memory_manager.get_system_prompt_injection()
+
+        # 方式 B：防御性兼容（若调用方传入的是分散的旧版实例）
+        blocks = []
+        if fact_store:
+            facts_str = fact_store.get_formatted_facts()
+            if facts_str:
+                blocks.append(facts_str)
+
+        if hasattr(memory_manager, "current_summary") and memory_manager.current_summary:
+            blocks.append(f"📌【前情提要 / 历史关键脉络摘要】：\n{memory_manager.current_summary}")
+
+        if blocks:
+            sep = "=" * 55
+            return f"\n\n{sep}\n" + "\n\n".join(blocks) + f"\n{sep}\n"
+        return ""
+
+    sys_logger.info(f"🚀 [Agent组装完毕] 引擎挂载成功，即将进入对话循环。")
+
+    # 4. 组装并返回 Agent
+    return agent
