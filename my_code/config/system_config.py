@@ -86,7 +86,7 @@ MEMORY_CONFIG = {
 
     # 【第 3 层：长期外部事实档案 Fact Store (策略 1 + 2 + 3)】
     "enable_fact_store": True,          # 是否启用长期事实持久化功能
-    "fact_store_path": str(CONFIG_DIR / "user_facts.json"),  # 本地持久化路径
+    "fact_store_path": str(Path(CONFIG_DIR) / "user_facts.json"),  # 本地持久化路径
 
     # 策略 1 专用：触发即时事实提取的正则关键词列表（0 Token 快速拦截门禁）
     "fact_trigger_keywords": [

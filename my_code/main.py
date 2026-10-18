@@ -29,16 +29,10 @@ from typing import Any, Optional
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
-# 层级记忆管理组件导入
-from utils.memory_manager import (
-    FactStore,                       # 第 3 层: 长期事实档案库 (策略 3 本地可读写 JSON)
-    FastFactGatekeeper,              # 第 3 层: 策略 1 毫秒级正则门禁 (0 Token 拦截)
-    RollingSummaryMemory,            # 第 2 层: 滚动会话摘要 + 策略 2 顺风车事实打捞
-    extract_facts_instantaneously    # 策略 1 即时执行器
-)
+# 统一记忆门面总管（一行代码涵盖门禁、裁剪、排雷、摘要与事实落盘）
+from utils.memory_manager import UnifiedMemoryManager
 
 # 导入其他的模块
-from utils.memory_manager import trim_history
 from agent.agent_builder import build_agent_with_mcp
 from utils.logger_print import print_and_log
 # 配置
@@ -139,11 +133,7 @@ async def process_single_turn(agent: Agent, user_input: str, history: list) -> l
 # ==========================================
 # 用户交互界面
 # ==========================================
-async def run_chat_loop(agent: Agent,
-    memory_mgr: RollingSummaryMemory,
-    fact_store: Optional[FactStore],
-    gatekeeper: FastFactGatekeeper,
-    summary_llm: Any):
+async def run_chat_loop(agent: Agent, memory_mgr: UnifiedMemoryManager):
     """
     控制台交互主引擎：
     在每轮交互中，协同调度【正则门禁】、【顺风车摘要】与【主 Agent 对话】
@@ -157,9 +147,10 @@ async def run_chat_loop(agent: Agent,
 
     # 如果场景变量名不叫 scenario_name，请换成实际传递给 agent_builder 的那个变量
     print_and_log(f"🎭 [当前场景 (System Prompt)]: {my_scenario_name}", "info")
-    if fact_store and fact_store.facts:
-        print_and_log(f"📚 [事实档案]: 已成功加载本地长期记忆库 ({fact_store.file_path.name})", "info")
-    print_and_log("═" * 50, "info")
+    # 显示长期事实档案状态
+    if memory_mgr.fact_store and memory_mgr.fact_store.facts:
+        print_and_log(f"📚 [事实档案]: 已成功加载本地长期记忆库 ({memory_mgr.fact_store.file_path.name})", "info")
+    print_and_log("═" * 55, "info")
 
     print_and_log("\n🚀 Agent 已就绪，开始聊天模式。随时输入 'exit' 退出。", "info")
 
@@ -196,26 +187,36 @@ async def run_chat_loop(agent: Agent,
 async def main(local_remote_flag: bool, model_name: str, scenario_name: str):
     sys_logger.info(f"系统启动中... [当前指定模型: {model_name}]")
 
-    # 第一步：定义后厨位置——启动连接（对接 MCP Server）
+    # 第一步：初始化统一记忆总管 (内含轻量抽取模型、长期事实档案与滚动摘要引擎)
+    memory_mgr = UnifiedMemoryManager(model_name=model_name)
+
+    # 第二步：定义后厨位置——启动连接（对接 MCP Server）
     server_parameters = StdioServerParameters(command="python", args=["mcp_server.py"])
 
-    # 第二步：接通管道并建立会话
+    # 第三步：接通管道并建立会话
     async with stdio_client(server_parameters) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             sys_logger.info("✅ 成功连接到 MCP Server！")
 
-            # 第三步：把 session 交给装配厂，换回一个组装好的 Agent
-            agent = await build_agent_with_mcp(session, model_name, scenario_name)
+            # 第四步：把 session 交给装配厂，换回一个组装好的 Agent
+            agent = await build_agent_with_mcp(
+                session=session,
+                model_name=model_name,
+                scenario_name=scenario_name,
+                memory_manager=memory_mgr
+            )
 
             # 第四步：把 Agent 放进聊天引擎
-            await run_chat_loop(agent)
+            await run_chat_loop(agent, memory_mgr)
 
 
 if __name__ == "__main__":
-    if USE_LOCAL_MODEL:
-        asyncio.run(main(local_remote_flag=USE_LOCAL_MODEL, model_name=LOCAL_MODEL_NAME,
-                         scenario_name=my_scenario_name))
-    else:
-        asyncio.run(main(local_remote_flag=USE_LOCAL_MODEL, model_name=REMOTE_MODEL_NAME,
-                         scenario_name=my_scenario_name))
+    active_model = LOCAL_MODEL_NAME if USE_LOCAL_MODEL else REMOTE_MODEL_NAME
+    asyncio.run(
+        main(
+            local_remote_flag=USE_LOCAL_MODEL,
+            model_name=active_model,
+            scenario_name=my_scenario_name
+        )
+    )
