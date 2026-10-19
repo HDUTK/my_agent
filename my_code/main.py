@@ -31,6 +31,9 @@ from mcp.client.session import ClientSession
 # 统一记忆门面总管（一行代码涵盖门禁、裁剪、排雷、摘要与事实落盘）
 from utils.memory_manager import UnifiedMemoryManager
 
+# 导入在线记录器
+from utils.session_recorder import SessionRecorder
+
 # 导入其他的模块
 from agent.agent_builder import build_agent_with_mcp
 from utils.logger_print import print_and_log
@@ -116,6 +119,9 @@ async def process_single_turn(agent: Agent, user_input: str, history: list) -> l
                 token_msg = f"📊 [Token结算 - 聊天界面] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}"
                 print_and_log(f"\n{token_msg}", "info")
 
+                # 挂载到 agent 对象上，方便 memory_mgr 无缝抓取 Token 消耗
+                agent._last_usage = usage
+
                 # 🌟 在水流完之后，更新聊天记录
                 return resp.all_messages()
 
@@ -139,10 +145,8 @@ async def run_chat_loop(agent: Agent, memory_mgr: UnifiedMemoryManager):
     """
     print_and_log("\n" + "═" * 50, "info")
 
-    if USE_LOCAL_MODEL:
-        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['local'][LOCAL_MODEL_NAME.lower()]['model_name']}", "info")
-    else:
-        print_and_log(f"🧠 [驱动模型]: {LLM_CONFIG['model']['remote'][REMOTE_MODEL_NAME.lower()]['type']}", "info")
+    model_disp = LOCAL_MODEL_NAME if USE_LOCAL_MODEL else REMOTE_MODEL_NAME
+    print_and_log(f"🧠 [驱动模型]: {model_disp} | 🎭 [场景人设]: {my_scenario_name}", "info")
 
     # 如果场景变量名不叫 scenario_name，请换成实际传递给 agent_builder 的那个变量
     print_and_log(f"🎭 [当前场景 (System Prompt)]: {my_scenario_name}", "info")
@@ -159,7 +163,11 @@ async def run_chat_loop(agent: Agent, memory_mgr: UnifiedMemoryManager):
         user_input = await asyncio.to_thread(input, "\n输入：")
         cleaned_input = user_input.strip()
 
+        # 🌟 退出拦截：调用总管将整场会话日志落盘至 pending 目录
         if cleaned_input.strip().lower() == 'exit':
+            saved_file = memory_mgr.finalize_session()
+            if saved_file:
+                print_and_log(f"📁 [会话归档] 原始日志已保存: {saved_file.name}", "info")
             print_and_log("👋 Agent 已退出。", "info")
             sys_logger.info("-" * 50)
             sys_logger.info("\n" * 5)
@@ -176,6 +184,14 @@ async def run_chat_loop(agent: Agent, memory_mgr: UnifiedMemoryManager):
         # （而长期事实和滚动前情提要，已由 agent_builder 中的动态钩子自动注入到了 System Prompt）
         # -----------------------------------------------------------------
         history = await process_single_turn(agent, cleaned_input, clean_history)
+
+        # 🌟 将本轮交互、参数与截断结果记入内存中的会话记录器
+        memory_mgr.record_turn(
+            user_input=cleaned_input,
+            new_history=history,
+            clean_history=clean_history,
+            usage=getattr(agent, "_last_usage", None)
+        )
 
         print("-" * 50)
 

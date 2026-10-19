@@ -56,6 +56,21 @@ COLLECTION_NAME = "tk_knowledge"
 
 
 # =========================================================================
+# 🌟 会话历史日志与离线情境经验 (Episodic Memory) 配置
+# =========================================================================
+# 会话日志物理存放根目录
+SESSION_LOG_DIR = BASE_DIR / "logs" / "chat_history"
+PENDING_SESSIONS_DIR = SESSION_LOG_DIR / "pending"    # 待提炼的原始会话 JSON
+ARCHIVED_SESSIONS_DIR = SESSION_LOG_DIR / "archived"  # 已提炼归档的会话 JSON
+
+# 情境经验卡片专用的向量库 Collection 名称 (物理隔离于行业文献库 tk_knowledge)
+EPISODIC_COLLECTION_NAME = "agent_episodic_memory"
+
+# 本地向量库根目录
+CHROMA_DB_DIR = DB_PERSIST_PATH
+
+
+# =========================================================================
 # 🌟 日志log相关
 # =========================================================================
 # 日志输出目录

@@ -9,6 +9,7 @@ function description: 此文件用于工业级 Agent 全层级记忆管理系统
     * 策略 1: 正则门禁（Gatekeeper）0 开销拦截显式设定，实时原子覆盖
     * 策略 2: 顺风车合并提取（Piggybacking），在淘汰消息做滚动摘要时顺手打捞潜藏事实
     * 策略 3: 本地结构化 JSON 存储，支持 Notepad++ 随时手工审查与修改
+  - 第 4 层前置: 在线轻量会话记录器 (SessionRecorder) -> 退出时自动生成 session_xxx.json (待离线提炼)
   - 🌟 统一门面: UnifiedMemoryManager 将上述所有生命周期封装为单一接口，彻底净化主调度中心
 author: TangKan
 contact: 785455964@qq.com
@@ -22,10 +23,10 @@ import os
 import re
 import json
 import copy
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Any, Optional, Dict
 
-from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelMessage,
@@ -38,8 +39,20 @@ from pydantic_ai.messages import (
 )
 
 from agent.llm_factory import get_llm_model
-from config.system_config import MEMORY_CONFIG
+from config.system_config import (
+    MEMORY_CONFIG,
+    BASE_DIR,
+    my_scenario_name,
+    USE_LOCAL_MODEL
+)
 from utils.logger_print import sys_logger
+
+# 路径防御性配置：优先使用 system_config 中的 PENDING_SESSIONS_DIR，缺失时自动兜底
+try:
+    from config.system_config import PENDING_SESSIONS_DIR
+except ImportError:
+    PENDING_SESSIONS_DIR = BASE_DIR / "logs" / "chat_history" / "pending"
+
 
 # =========================================================================
 # 1. Token 计量组件 (基于 tiktoken，支持未安装时平滑降级)
@@ -148,66 +161,6 @@ def prune_older_tool_returns(history: List[ModelMessage],
         msg.parts = new_parts
 
     return cloned_history
-
-
-# # =========================================================================
-# # 3. 独立安全修剪函数 (原 core_utils 中的 trim_history 升级版)
-# # =========================================================================
-# def trim_history(
-#         history: List[ModelMessage],
-#         token_budget: Optional[int] = None,
-#         max_messages: Optional[int] = None,
-#         prune_tools: Optional[bool] = None
-# ) -> List[ModelMessage]:
-#     """
-#     轻量单步历史裁剪器：
-#     1. 工具剪枝 -> 2. Token 预算打捞 -> 3. API 协议安全排雷
-#     """
-#     if not history:
-#         return []
-#
-#     budget = token_budget if token_budget is not None else MEMORY_CONFIG["token_budget"]
-#     msg_limit = max_messages if max_messages is not None else MEMORY_CONFIG["max_messages"]
-#     do_prune = prune_tools if prune_tools is not None else MEMORY_CONFIG["enable_tool_pruning"]
-#
-#     # 阶段 1：工具剪枝
-#     processed_history = prune_older_tool_returns(history) if do_prune else history
-#
-#     # 阶段 2：基于 Token 预算倒序截取
-#     selected: List[ModelMessage] = []
-#     current_tokens = 0
-#
-#     for msg in reversed(processed_history):
-#         t_cost = estimate_message_tokens(msg)
-#         if (current_tokens + t_cost > budget) or (len(selected) >= msg_limit):
-#             break
-#         selected.append(msg)
-#         current_tokens += t_cost
-#
-#     # 恢复正序时间流
-#     selected.reverse()
-#
-#     # 阶段 3：原子调用排雷（首条必须是合法用户请求）
-#     while selected:
-#         first_msg = selected[0]
-#         is_invalid = False
-#
-#         # 雷区 A：首条不能是模型生成的回复
-#         if isinstance(first_msg, ModelResponse):
-#             is_invalid = True
-#
-#         # 雷区 B：首条不能是包含了孤立工具结果的请求
-#         elif isinstance(first_msg, ModelRequest):
-#             if any(isinstance(p, ToolReturnPart) for p in first_msg.parts):
-#                 is_invalid = True
-#
-#         if is_invalid:
-#             selected.pop(0)
-#         else:
-#             break
-#
-#     # 极端防御：如果排雷后列表为空，保留最后一条有效消息作为保底
-#     return selected if selected else (history[-1:] if history else [])
 
 
 # =========================================================================
@@ -505,7 +458,119 @@ class RollingSummaryEngine:
 
 
 # =========================================================================
-# 🌟 6. 统一记忆外观总管 (UnifiedMemoryManager) - 彻底净化 main.py
+# 6. 会话轻量记录器 (SessionRecorder) - 为第 4 层离线提炼准备数据
+# =========================================================================
+class SessionRecorder:
+    """纯内存记录单轮实体、入参与截断结果，退出时一键写入 pending 目录"""
+    def __init__(self, model_name: str, scenario_name: str = "", is_local: bool = False):
+        self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.start_time = datetime.now().isoformat()
+        self.model_info = {
+            "driver_type": "local" if is_local else "remote",
+            "model_name": model_name,
+            "scenario": scenario_name
+        }
+        self.turns: List[Dict[str, Any]] = []
+        self.total_tool_calls = 0
+        self.total_tokens_consumed = 0
+
+    def record_turn(
+        self,
+        turn_id: int,
+        user_input: str,
+        new_messages: List[ModelMessage],
+        usage: Any = None
+    ) -> None:
+        """从本轮新增的消息中精准解析工具参数与模型最终回复"""
+        tool_records = []
+        calls_map: Dict[str, Dict[str, Any]] = {}
+        returns_map: Dict[str, str] = {}
+        agent_replies = []
+
+        for msg in new_messages:
+            if isinstance(msg, ModelResponse):
+                for part in msg.parts:
+                    if isinstance(part, ToolCallPart):
+                        call_id = getattr(part, "tool_call_id", None) or part.tool_name
+                        calls_map[call_id] = {
+                            "tool_name": part.tool_name,
+                            "arguments": part.args if isinstance(part.args, dict) else str(part.args)
+                        }
+                    elif isinstance(part, TextPart) and part.content:
+                        agent_replies.append(part.content.strip())
+            elif isinstance(msg, ModelRequest):
+                for part in msg.parts:
+                    if isinstance(part, ToolReturnPart):
+                        raw_ret = str(part.content)
+                        # 核心防爆机制：工具返回值严格截断到 300 字符以内
+                        if len(raw_ret) > 300:
+                            summary_ret = raw_ret[:300].replace("\n", " ").strip() + f"... [数据截断，共 {len(raw_ret)} 字符]"
+                        else:
+                            summary_ret = raw_ret.replace("\n", " ").strip()
+                        call_id = getattr(part, "tool_call_id", None) or part.tool_name
+                        returns_map[call_id] = summary_ret
+
+        for call_id, call_info in calls_map.items():
+            ret_content = returns_map.get(call_id, "[已执行无文本回显]")
+            tool_records.append({
+                "tool_name": call_info["tool_name"],
+                "arguments": call_info["arguments"],
+                "result_summary": ret_content
+            })
+
+        self.total_tool_calls += len(tool_records)
+        turn_tokens = getattr(usage, "total_tokens", 0) if usage else 0
+        self.total_tokens_consumed += turn_tokens
+
+        self.turns.append({
+            "turn_id": turn_id,
+            "timestamp": datetime.now().isoformat(),
+            "user_input": user_input,
+            "tool_calls": tool_records,
+            "agent_reply": agent_replies[-1] if agent_replies else "",
+            "tokens": {
+                "input": getattr(usage, "input_tokens", 0) if usage else 0,
+                "output": getattr(usage, "output_tokens", 0) if usage else 0,
+                "total": turn_tokens
+            }
+        })
+
+    def save_to_pending(self) -> Optional[Path]:
+        """将内存中的会话数据原子落盘"""
+        if not self.turns:
+            return None
+
+        PENDING_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = PENDING_SESSIONS_DIR / f"{self.session_id}.json"
+
+        payload = {
+            "session_id": self.session_id,
+            "meta": {
+                "start_time": self.start_time,
+                "end_time": datetime.now().isoformat(),
+                "status": "pending",
+                "model_info": self.model_info,
+                "stats": {
+                    "total_turns": len(self.turns),
+                    "tool_call_count": self.total_tool_calls,
+                    "total_tokens_consumed": self.total_tokens_consumed
+                }
+            },
+            "turns": self.turns
+        }
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            sys_logger.info(f"💾 [会话落盘] 本场对话日志已持久化至: {file_path.name}")
+            return file_path
+        except Exception as e:
+            sys_logger.error(f"❌ [会话落盘失败] {e}")
+            return None
+
+
+# =========================================================================
+# 🌟 7. 统一记忆外观总管 (UnifiedMemoryManager) - 彻底净化 main.py
 # =========================================================================
 class UnifiedMemoryManager:
     """
@@ -514,7 +579,15 @@ class UnifiedMemoryManager:
     外部调用者（main.py）每轮对话只需调用 `prepare_turn_context` 单一接口。
     """
 
-    def __init__(self, model_name: str):
+    def __init__(
+        self,
+        model_name: str,
+        scenario_name: Optional[str] = None,
+        is_local: Optional[bool] = None
+    ):
+        # 0. 若外部未传参，自动读取 system_config.py 中的全局配置兜底
+        actual_scenario = scenario_name if scenario_name is not None else my_scenario_name
+        actual_is_local = is_local if is_local is not None else USE_LOCAL_MODEL
         # 1. 实例化专用后台轻量抽取模型
         self.summary_llm = get_llm_model(model_name)
 
@@ -526,6 +599,14 @@ class UnifiedMemoryManager:
 
         # 4. 初始化滚动摘要与顺风车引擎 (第 2 层 + 策略 2)
         self.summary_engine = RollingSummaryEngine(summarizer_model=self.summary_llm)
+
+        # 挂载离线会话记录器
+        self.recorder = SessionRecorder(
+            model_name=model_name,
+            scenario_name=actual_scenario,
+            is_local=actual_is_local
+        )
+        self.turn_counter = 0
 
     async def prepare_turn_context(self, user_input: str, history: List[ModelMessage]) -> List[ModelMessage]:
         """
@@ -554,6 +635,31 @@ class UnifiedMemoryManager:
 
         # --- 步骤 D: 返回干净的短期历史 ---
         return surviving
+
+    def record_turn(
+            self,
+            user_input: str,
+            new_history: List[ModelMessage],
+            clean_history: List[ModelMessage],
+            usage: Any = None
+    ) -> None:
+        """
+        【主调度接口 2】：单轮结束后，记录本轮问答、工具参数与截断结果
+        """
+        self.turn_counter += 1
+        turn_new_messages = new_history[len(clean_history):]
+        self.recorder.record_turn(
+            turn_id=self.turn_counter,
+            user_input=user_input,
+            new_messages=turn_new_messages,
+            usage=usage
+        )
+
+    def finalize_session(self) -> Optional[Path]:
+        """
+        【主调度接口 3】：用户退出时，将整场会话日志持久化写入 pending 目录
+        """
+        return self.recorder.save_to_pending()
 
     async def _extract_instant_facts(self, user_text: str) -> None:
         """策略 1 执行逻辑：唤醒模型提取单句设定"""
