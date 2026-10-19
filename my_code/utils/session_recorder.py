@@ -14,7 +14,6 @@ version: V1.0
 Target Python: 
 """
 
-import os
 import json
 from datetime import datetime
 from pathlib import Path

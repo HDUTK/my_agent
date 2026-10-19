@@ -29,11 +29,11 @@ import chromadb
 from pydantic_ai import Agent
 
 from config.system_config import (
+    EPISODIC_MEMORY_CONFIG,
     PENDING_SESSIONS_DIR,
     ARCHIVED_SESSIONS_DIR,
     DB_PERSIST_PATH,
-    EPISODIC_COLLECTION_NAME,
-    REMOTE_MODEL_NAME
+    EPISODIC_COLLECTION_NAME
 )
 from agent.llm_factory import get_llm_model
 from utils.logger_print import sys_logger
@@ -53,15 +53,23 @@ def is_session_worth_analyzing(session_data: Dict[str, Any]) -> bool:
     total_turns = stats.get("total_turns", 0)
     tool_calls = stats.get("tool_call_count", 0)
 
-    # 规则 1 & 2: 轮次不够或无工具调用，直接跳过
-    if total_turns < 2 or tool_calls == 0:
+    # 🌟 阈值 1: 最低轮次门槛
+    min_turns = EPISODIC_MEMORY_CONFIG.get("miner_min_turns", 2)
+    if total_turns < min_turns:
         return False
 
-    # 规则 3: 关键词快速命中扫描
-    text_content = json.dumps(session_data.get("turns", []), ensure_ascii=False)
-    domain_pattern = re.compile(r"(传感器|测点|A63|9号窟|10号窟|结露|温湿度|壁温|露点|阈值|排查|方案|实验|算法)")
-    if not domain_pattern.search(text_content):
+    # 🌟 阈值 2: 是否强制要求工具调用
+    require_tool = EPISODIC_MEMORY_CONFIG.get("miner_require_tool_call", True)
+    if require_tool and tool_calls == 0:
         return False
+
+    # 🌟 阈值 3: 关键词库匹配
+    keywords = EPISODIC_MEMORY_CONFIG.get("miner_domain_keywords", [])
+    if keywords:
+        text_content = json.dumps(session_data.get("turns", []), ensure_ascii=False)
+        domain_pattern = re.compile("|".join(keywords))
+        if not domain_pattern.search(text_content):
+            return False
 
     return True
 
@@ -192,7 +200,10 @@ async def run_batch_mining():
     print(f"📦 共发现 {len(session_files)} 个待处理会话日志，准备提炼...\n")
 
     ARCHIVED_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    llm = get_llm_model(REMOTE_MODEL_NAME)
+    # llm = get_llm_model(REMOTE_MODEL_NAME)
+    # 从配置读取提炼模型
+    model_name = EPISODIC_MEMORY_CONFIG.get("miner_model_name")
+    llm = get_llm_model(model_name)
 
     processed_count = 0
     distilled_count = 0

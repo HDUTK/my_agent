@@ -145,8 +145,10 @@ async def run_chat_loop(agent: Agent, memory_mgr: UnifiedMemoryManager):
     """
     print_and_log("\n" + "═" * 50, "info")
 
-    model_disp = LOCAL_MODEL_NAME if USE_LOCAL_MODEL else REMOTE_MODEL_NAME
-    print_and_log(f"🧠 [驱动模型]: {model_disp} | 🎭 [场景人设]: {my_scenario_name}", "info")
+    # model_disp = LOCAL_MODEL_NAME if USE_LOCAL_MODEL else REMOTE_MODEL_NAME
+    model_disp_name = LLM_CONFIG["model"]["local"][LOCAL_MODEL_NAME.lower()]["ollama_name"] if USE_LOCAL_MODEL else \
+    LLM_CONFIG["model"]["remote"][REMOTE_MODEL_NAME.lower()]["type"]
+    print_and_log(f"🧠 [驱动模型]: {model_disp_name} | 🎭 [场景人设]: {my_scenario_name}", "info")
 
     # 如果场景变量名不叫 scenario_name，请换成实际传递给 agent_builder 的那个变量
     print_and_log(f"🎭 [当前场景 (System Prompt)]: {my_scenario_name}", "info")

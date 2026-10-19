@@ -41,6 +41,7 @@ from pydantic_ai.messages import (
 from agent.llm_factory import get_llm_model
 from config.system_config import (
     MEMORY_CONFIG,
+    EPISODIC_MEMORY_CONFIG,
     BASE_DIR,
     my_scenario_name,
     USE_LOCAL_MODEL
@@ -474,6 +475,11 @@ class SessionRecorder:
         self.total_tool_calls = 0
         self.total_tokens_consumed = 0
 
+        # 从配置文件读取参数
+        self.enabled = EPISODIC_MEMORY_CONFIG.get("enable_session_recording", True)
+        self.tool_summary_limit = EPISODIC_MEMORY_CONFIG.get("recorder_tool_summary_chars", 300)
+        self.min_turns_to_save = EPISODIC_MEMORY_CONFIG.get("recorder_min_turns_to_save", 1)
+
     def record_turn(
         self,
         turn_id: int,
@@ -503,8 +509,11 @@ class SessionRecorder:
                     if isinstance(part, ToolReturnPart):
                         raw_ret = str(part.content)
                         # 核心防爆机制：工具返回值严格截断到 300 字符以内
-                        if len(raw_ret) > 300:
-                            summary_ret = raw_ret[:300].replace("\n", " ").strip() + f"... [数据截断，共 {len(raw_ret)} 字符]"
+                        if len(raw_ret) > self.tool_summary_limit:
+                            summary_ret = (
+                                    raw_ret[:self.tool_summary_limit].replace("\n", " ").strip()
+                                    + f"... [数据截断，共 {len(raw_ret)} 字符]"
+                            )
                         else:
                             summary_ret = raw_ret.replace("\n", " ").strip()
                         call_id = getattr(part, "tool_call_id", None) or part.tool_name
@@ -538,6 +547,10 @@ class SessionRecorder:
     def save_to_pending(self) -> Optional[Path]:
         """将内存中的会话数据原子落盘"""
         if not self.turns:
+            return None
+
+        # 检查落盘最低轮次限制，防止写入无意义空文件
+        if len(self.turns) < self.min_turns_to_save:
             return None
 
         PENDING_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)

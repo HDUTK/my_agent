@@ -58,14 +58,49 @@ COLLECTION_NAME = "tk_knowledge"
 # =========================================================================
 # 🌟 会话历史日志与离线情境经验 (Episodic Memory) 配置
 # =========================================================================
+# =========================================================================
+# 🌟 第 4 层：离线情境经验与会话记录配置 (Episodic Memory Config)
+# =========================================================================
+EPISODIC_MEMORY_CONFIG = {
+    # ----------------------------------------------------
+    # 1. 在线会话记录器参数 (Session Recorder)
+    # ----------------------------------------------------
+    "enable_session_recording": True,               # 是否开启会话历史记录落盘
+    "recorder_tool_summary_chars": 300,             # 记录到 JSON 的工具返回值最大截断字符数
+    "recorder_min_turns_to_save": 1,                # 最少有效轮次，避免退出时产生空文件
+
+    # ----------------------------------------------------
+    # 2. 本地存储路径与独立向量库 (Paths & ChromaDB)
+    # ----------------------------------------------------
+    "session_log_dir": str(BASE_DIR / "logs" / "chat_history"),
+    "pending_dir": str(BASE_DIR / "logs" / "chat_history" / "pending"),
+    "archived_dir": str(BASE_DIR / "logs" / "chat_history" / "archived"),
+    "episodic_collection_name": "agent_episodic_memory", # 独立经验卡片集合
+    "chroma_db_dir": str(BASE_DIR / "db_storage" / "chroma_db"),
+
+    # ----------------------------------------------------
+    # 3. 离线提炼前置硬门禁参数 (0 Token 过滤规则)
+    # ----------------------------------------------------
+    "miner_min_turns": 2,                           # 触发大模型提炼的最低交互轮次
+    "miner_require_tool_call": True,                # 是否要求会话中必须存在工具调用
+    "miner_min_total_chars": 200,                   # 会话总字符数下限
+    "miner_domain_keywords": [                      # 业务关键词命中列表 (命中其一才提炼)
+        "传感器", "测点", "A63", "9号窟", "10号窟", "结露",
+        "温湿度", "壁温", "露点", "阈值", "排查", "方案", "实验", "算法"
+    ],
+
+    # ----------------------------------------------------
+    # 4. 离线大模型审计参数 (LLM Distillation)
+    # ----------------------------------------------------
+    "miner_model_name": REMOTE_MODEL_NAME,          # 离线提炼使用的模型 (可单独指定轻量模型)
+    "card_embedding_summary_max_words": 150         # 卡片向量检索浓缩摘要字数限制
+}
 # 会话日志物理存放根目录
 SESSION_LOG_DIR = BASE_DIR / "logs" / "chat_history"
 PENDING_SESSIONS_DIR = SESSION_LOG_DIR / "pending"    # 待提炼的原始会话 JSON
 ARCHIVED_SESSIONS_DIR = SESSION_LOG_DIR / "archived"  # 已提炼归档的会话 JSON
-
 # 情境经验卡片专用的向量库 Collection 名称 (物理隔离于行业文献库 tk_knowledge)
 EPISODIC_COLLECTION_NAME = "agent_episodic_memory"
-
 # 本地向量库根目录
 CHROMA_DB_DIR = DB_PERSIST_PATH
 
