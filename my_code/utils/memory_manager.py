@@ -39,12 +39,15 @@ from pydantic_ai.messages import (
 )
 
 from agent.llm_factory import get_llm_model
+import chromadb
 from config.system_config import (
     MEMORY_CONFIG,
     EPISODIC_MEMORY_CONFIG,
     BASE_DIR,
     my_scenario_name,
-    USE_LOCAL_MODEL
+    USE_LOCAL_MODEL,
+    CHROMA_DB_DIR,
+    EPISODIC_COLLECTION_NAME
 )
 from utils.logger_print import sys_logger
 
@@ -590,6 +593,7 @@ class UnifiedMemoryManager:
     全层级记忆调度外观中枢：
     把长期事实、正则门禁、滚动摘要、Token 裁剪与协议排雷全量收敛至内部。
     外部调用者（main.py）每轮对话只需调用 `prepare_turn_context` 单一接口。
+    集成热目录 (Hot Path) 实时抽取与置信度显式注入。
     """
 
     def __init__(
@@ -620,6 +624,65 @@ class UnifiedMemoryManager:
             is_local=actual_is_local
         )
         self.turn_counter = 0
+
+    # 🌟 从 ChromaDB 中高效抓取最新 N 条已归档卡片作为热目录
+    def _fetch_hot_episode_cards(self) -> str:
+        """从 ChromaDB 中提取最近沉淀的经验卡片，生成轻量热目录文本"""
+        if not EPISODIC_MEMORY_CONFIG.get("hot_path_enabled", True):
+            return ""
+
+        try:
+            client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+            # 若集合不存在直接返回空
+            existing_col_names = [c.name if hasattr(c, "name") else c for c in client.list_collections()]
+            if EPISODIC_COLLECTION_NAME not in existing_col_names:
+                return ""
+
+            col = client.get_collection(EPISODIC_COLLECTION_NAME)
+            total = col.count()
+            if total == 0:
+                return ""
+
+            limit = EPISODIC_MEMORY_CONFIG.get("hot_path_cards_limit", 3)
+            max_chars = EPISODIC_MEMORY_CONFIG.get("hot_path_title_max_chars", 40)
+
+            # 拉取最新记录 (ID 按 session_YYYYMMDD 命名，倒序即为时间顺序)
+            data = col.get(include=["metadatas"])
+            ids = data.get("ids", [])
+            metas = data.get("metadatas", [])
+
+            if not ids:
+                return ""
+
+            # 取最近的 N 条记录
+            recent_ids = ids[-limit:]
+            recent_metas = metas[-limit:]
+
+            lines = [
+                "🟢【近期高置信度任务索引目录 (热路径 Hot Path)】：",
+                "（注：以下为近期真实完成并归档的科研任务，记录属实，置信度【极高】）"
+            ]
+
+            for item_id, meta in zip(reversed(recent_ids), reversed(recent_metas)):
+                title = meta.get("title", "未命名任务")[:max_chars]
+                caves = meta.get("target_caves", "-")
+                sensors = meta.get("sensors", "-")
+                conclusion = meta.get("final_conclusion", "")[:50]
+                lines.append(f"- [ID: {item_id}] 窟:{caves} | 点:{sensors} | 主题: {title}")
+                if conclusion:
+                    lines.append(f"  ↳ 核心结论: {conclusion}...")
+
+            lines.append("\n⚠️【历史参数查询行为约束 (Grounding Policy)】：")
+            lines.append("1. 若用户询问的历史排查或参数已在上方热目录中列出，可直接依据热目录作答；")
+            lines.append("2. 若用户询问特定历史实验/测点阈值，但上方热目录未包含，【严禁依靠常识推算或编造数字】！")
+            lines.append("   此时必须主动调用 `search_past_experience` 工具回溯冷库记录；")
+            lines.append("3. 若工具亦未查到，请如实告知用户未找到历史记录。")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            sys_logger.warning(f"⚠️ [热目录读取跳过] {e}")
+            return ""
 
     async def prepare_turn_context(self, user_input: str, history: List[ModelMessage]) -> List[ModelMessage]:
         """
@@ -702,15 +765,22 @@ class UnifiedMemoryManager:
     def get_system_prompt_injection(self) -> str:
         """供 Agent 装配厂一键获取注入内容（长期事实 + 会话摘要）"""
         blocks = []
+        # 刚性事实档案
         if self.fact_store:
             facts_str = self.fact_store.get_formatted_facts()
             if facts_str:
                 blocks.append(facts_str)
 
+        # 当前长对话滚动前情提要
         if self.summary_engine.current_summary:
             blocks.append(
                 f"📌【前情提要 / 历史关键脉络摘要】：\n{self.summary_engine.current_summary}"
             )
+
+        # 经验卡片常驻热目录
+        hot_path_text = self._fetch_hot_episode_cards()
+        if hot_path_text:
+            blocks.append(hot_path_text)
 
         if blocks:
             sep = "=" * 55

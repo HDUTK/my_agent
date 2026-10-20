@@ -2,6 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 function description: 此文件用于agent能够使用的工具等
+功能列表:
+1. 获取宿主机硬件与系统信息 (get_host_info)
+2. 本地文件纯文本读取 (read_file)
+3. 文件夹下文件名提取 (get_file_names)
+4. 本地文件重命名 (rename_file)
+5. Pandas CSV 结构化数据过滤查询 (query_csv)
+6. 石窟传感器结构化诊断报告提交 (submit_sensor_record)
+7. 学术论文手稿 Word (.docx) 文本解析 (read_docx_file)
+8. 论文 7 大章节结构化总结提交 (submit_paper_section)
+9. 复杂任务便签本状态更新 (update_task_notes)
+🌟 新增功能 (情境经验冷库交互工具集):
+10. 冷路径向量经验检索 (search_past_experience): 热目录落空时按需检索过往实验与阈值参数
+11. 经验卡片 ID 详情穿透 (get_experience_detail_by_id): 根据唯一 ID 二级拉取全量实验步骤与代码
 author: TangKan
 contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
@@ -17,7 +30,17 @@ import psutil
 import pandas as pd
 import docx
 
+import chromadb
+from typing import Optional
+
 from utils.logger_print import sys_logger, print_and_log
+
+# 集中读取 system_config.py 中的向量库与情境记忆配置
+from config.system_config import (
+    CHROMA_DB_DIR,
+    EPISODIC_COLLECTION_NAME,
+    EPISODIC_MEMORY_CONFIG
+)
 
 
 def get_host_info() -> str:
@@ -167,7 +190,7 @@ def query_csv(file_path: str, query_string: str) -> str:
 
 
 # ==========================================
-# 🌟 新增数据提交工具
+# 🌟 数据提交工具
 # ==========================================
 def submit_sensor_record(
         target_time: str,
@@ -302,6 +325,135 @@ def update_task_notes(current_action: str, checklist_status: str, next_step: str
     sys_logger.info(log_msg)
 
     return "笔记已更新。请严格根据 next_step 继续执行下一个工具调用，在所有任务打钩前，绝对保持静默！"
+
+
+# =========================================================================
+# 🌟 第 4 层：情境经验冷库检索与详情穿透工具集 (Episodic Memory Tools)
+# =========================================================================
+
+def _get_episodic_collection():
+    """
+    内部辅助函数：安全获取经验卡片专属 Collection 实例。
+    - 路径读取自 system_config.py 中的 CHROMA_DB_DIR
+    - 集合名读取自 system_config.py 中的 EPISODIC_COLLECTION_NAME
+    """
+    client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+    return client.get_or_create_collection(name=EPISODIC_COLLECTION_NAME)
+
+
+def search_past_experience(
+        query: str,
+        target_cave: Optional[str] = None,
+        sensor_id: Optional[str] = None
+) -> str:
+    """
+    【专有功能】: 仅用于从持久化经验冷库中检索过往完成的石窟微气候排查、故障分析、传感器阈值测定等科研历史任务。
+
+    【调用触发铁律】:
+    1. 当用户询问过去某次实验的具体结论、历史定案参数（如 A63 阈值、结露排查），且当前 System Prompt 中的【热目录】未列出该任务时，必须调用本工具！
+    2. 支持通过 target_cave (如 "9号窟") 或 sensor_id (如 "A63") 缩小检索范围。
+
+    【严禁调用场景】:
+    1. 用户询问通用编程代码、通用数学计算、阅读本地文件时，严禁调用；
+    2. 查阅石窟国家文保行业规范、专著文献时，应调用 search_knowledge_base，严禁调用此工具；
+    3. 若【热目录】已明确给出了对应任务的结论，严禁调用本搜索工具！
+    """
+    try:
+        col = _get_episodic_collection()
+        top_k = EPISODIC_MEMORY_CONFIG.get("cold_search_top_k", 3)
+
+        # 1. 动态构造元数据前置过滤条件 (缩小搜索范围，降低干扰)
+        where_conditions = {}
+        if sensor_id:
+            where_conditions["sensors"] = {"$contains": sensor_id.strip()}
+        if target_cave:
+            where_conditions["target_caves"] = {"$contains": target_cave.strip()}
+
+        where_clause = where_conditions if where_conditions else None
+
+        # 2. 执行向量余弦相似度粗筛
+        results = col.query(
+            query_texts=[query],
+            where=where_clause,
+            n_results=top_k,
+            include=["documents", "metadatas"]
+        )
+
+        docs = results.get("documents", [[]])[0]
+        metas = results.get("metadatas", [[]])[0]
+        ids = results.get("ids", [[]])[0]
+
+        if not docs:
+            return "【冷库检索结果】：未在历史经验库中检索到与该问题匹配的卡片。请确认测点代号或关键词是否准确。"
+
+        # 3. 组装带有置信度分级警示与详情提取提示的文本块
+        lines = [
+            "==================================================",
+            f"🟡【向量冷库语义检索候选卡片 (共召回 {len(docs)} 条)】："
+        ]
+
+        for idx, (doc_text, meta, item_id) in enumerate(zip(docs, metas, ids), 1):
+            title = meta.get("title", "未命名任务") if meta else "未命名任务"
+            caves = meta.get("target_caves", "-") if meta else "-"
+            sensors = meta.get("sensors", "-") if meta else "-"
+            conclusion = meta.get("final_conclusion", "无明确结论记录") if meta else "无明确结论记录"
+
+            lines.append(f"\n--- [候选 #{idx} | ID: {item_id}] ---")
+            lines.append(f"• 任务主题: {title}")
+            lines.append(f"• 关联实体: 窟号: {caves} | 测点: {sensors}")
+            lines.append(f"• 核心结论摘要: {conclusion}")
+            lines.append(f"• 详细脉络切片: {doc_text}")
+            lines.append(
+                f"👉 (若需提取该任务的全量排查过程与代码，可调用 get_experience_detail_by_id(episode_id='{item_id}'))")
+
+        # 4. 追加认知谦逊约束警示语 (来自 system_config.py)
+        warning_text = EPISODIC_MEMORY_CONFIG.get("cold_confidence_warning", "")
+        lines.append("\n" + warning_text)
+        lines.append("==================================================")
+
+        sys_logger.info(f"🔍 [冷路径召回] 成功按语义在冷库中检索到 {len(docs)} 条历史卡片。")
+        return "\n".join(lines)
+
+    except Exception as e:
+        sys_logger.error(f"❌ [冷库检索异常] {e}")
+        return f"检索历史经验冷库时出现内部错误: {e}"
+
+
+def get_experience_detail_by_id(episode_id: str) -> str:
+    """
+    【专有功能】: 根据经验卡片的唯一 ID (如 session_20261019_153022) 穿透提取全量排查技术细节与刚性参数。
+
+    【何时调用】: 当热目录或冷库搜索结果中的简要结论不足以解答细节，需追溯当时具体的排查步骤、对比数据或代码段时调用。
+    """
+    try:
+        col = _get_episodic_collection()
+        res = col.get(ids=[episode_id.strip()], include=["documents", "metadatas"])
+
+        docs = res.get("documents", [])
+        metas = res.get("metadatas", [])
+
+        if not docs:
+            return f"⚠️ 未在经验库中找到 ID 为 [{episode_id}] 的完整卡片记录。"
+
+        meta = metas[0] if metas else {}
+        doc = docs[0]
+
+        detail_lines = [
+            "==================================================",
+            f"📋【历史任务全量经验档案 (ID: {episode_id})】",
+            f"• 任务标题: {meta.get('title', '-')}",
+            f"• 涉及洞窟: {meta.get('target_caves', '-')}",
+            f"• 涉及测点: {meta.get('sensors', '-')}",
+            f"• 核心问题与排查目标: {meta.get('problem_and_goal', '-')}",
+            f"• 最终定案结论与参数: {meta.get('final_conclusion', '-')}",
+            f"• 完整密集总结:\n  {doc}",
+            "=================================================="
+        ]
+        return "\n".join(detail_lines)
+
+    except Exception as e:
+        sys_logger.error(f"❌ [穿透详情异常] {e}")
+        return f"读取经验卡片详情失败: {e}"
 
 
 # 使用示例
