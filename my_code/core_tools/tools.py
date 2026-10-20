@@ -360,6 +360,11 @@ def search_past_experience(
     """
     try:
         col = _get_episodic_collection()
+
+        # 库内完全为空时优雅直接返回
+        if col.count() == 0:
+            return "【冷库检索结果】：当前历史经验库尚无任何已归档的实验任务卡片。"
+
         top_k = EPISODIC_MEMORY_CONFIG.get("cold_search_top_k", 3)
 
         # 1. 动态构造元数据前置过滤条件 (缩小搜索范围，降低干扰)
