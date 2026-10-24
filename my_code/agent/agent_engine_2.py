@@ -25,6 +25,8 @@ from langgraph.graph import StateGraph, START, END
 
 from utils.logger_print import sys_logger, print_and_log
 from config.agent_config import PLANNER_MAX_TOKENS, EXECUTOR_MAX_TOKENS
+# 引入反向还原函数
+from utils.core_utils import security_proxy
 
 # langsmith监控
 from langsmith import traceable
@@ -273,11 +275,13 @@ class UniversalPlanExecuteEngine:
                 content_chunks.append(text_chunk)
             print()
 
+        raw_content = "".join(content_chunks)
+        # 当场反向还原：若本轮无脱敏 (has_masked_in_turn == False)，直接返回 raw_content
+        content = security_proxy.demask_response(raw_content)
+
         usage = resp.usage()
         print_and_log(f" [Token结算 - 执行节点 {idx + 1}] 输出: {usage.output_tokens}", "info")
-
-        content = "".join(content_chunks)
-        sys_logger.info(f"[执行节点 {idx + 1} 完整回复]\n{content}")
+        sys_logger.info(f"[执行节点 {idx + 1} 完整回复(已反向还原真实实体)]\n{content}")
 
         # 🌟 获取旧的数据字典，然后进行拷贝修改
         # TypedDict

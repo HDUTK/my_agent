@@ -12,9 +12,10 @@ function description: 此文件用于agent能够使用的工具等
 7. 学术论文手稿 Word (.docx) 文本解析 (read_docx_file)
 8. 论文 7 大章节结构化总结提交 (submit_paper_section)
 9. 复杂任务便签本状态更新 (update_task_notes)
-🌟 新增功能 (情境经验冷库交互工具集):
 10. 冷路径向量经验检索 (search_past_experience): 热目录落空时按需检索过往实验与阈值参数
 11. 经验卡片 ID 详情穿透 (get_experience_detail_by_id): 根据唯一 ID 二级拉取全量实验步骤与代码
+12. 统一安全出口网关 (secure_file_output_gateway): 针对所有文件类型的统一清洗、可逆脱敏与物理阻断中枢
+13. 本地 PDF 文本提取器 (read_pdf_file): 自动接入统一安全管道清洗
 author: TangKan
 contact: 785455964@qq.com
 IDE: PyCharm Community Edition 2026.1.1
@@ -42,6 +43,9 @@ from config.system_config import (
     EPISODIC_MEMORY_CONFIG
 )
 
+# 引入密级判定与切面安全装饰器
+from utils.core_utils import detect_security_level, security_guard, security_proxy
+
 
 def get_host_info() -> str:
     """
@@ -67,26 +71,28 @@ def get_host_info() -> str:
 
     return json.dumps(info, indent=4)
 
-
-def read_file(file_path: str) -> str:
-    """读取指定路径的文件内容，返回字符串"""
+@security_guard
+def read_file(file_path: str) -> dict:
+    """读取指定路径的文件内容（前置校验白名单/黑名单，后置执行DLP脱敏清洗）"""
+    level = detect_security_level(file_path)
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             msg = f.read()
             sys_logger.info(f"[工具执行] 成功读取文件: {file_path} (长度: {len(msg)})")
-            return msg
+            # 🌟 返回标准载荷字典，由 @security_guard 切面拦截清洗
+            return {"content": msg, "security_level": level, "file_path": file_path}
     except FileNotFoundError:
         msg = f"错误：文件 '{file_path}' 不存在"
         sys_logger.error(msg)
-        return msg
+        return {"content": msg, "security_level": "L4", "file_path": file_path}
     except Exception as e:
         msg = f"读取文件时出错：{e}"
         sys_logger.error(msg)
-        return msg
+        return {"content": msg, "security_level": "L4", "file_path": file_path}
 
-
+@security_guard
 def get_file_names(folder_path: str) -> str:
-    """返回指定文件夹内所有文件的文件名（不包括子文件夹内的文件）"""
+    """返回指定文件夹内所有文件的文件名（不包括子文件夹内的文件）（受白名单/黑名单安全网关保护，严禁遍历外部路径）"""
     try:
         # 列出文件夹内所有条目
         entries = os.listdir(folder_path)
@@ -107,10 +113,10 @@ def get_file_names(folder_path: str) -> str:
         sys_logger.error(msg)
         return msg
 
-
+@security_guard
 def rename_file(file_path: str, new_name: str) -> bool:
     """
-    将文件重命名为新名字（不包含路径，仅文件名或完整路径均可）
+    将文件重命名为新名字（不包含路径，仅文件名或完整路径均可）（受白名单/黑名单安全网关保护）
     参数：
         file_path: 原文件的完整路径
         new_name:  新文件名（例如 "newfile.txt"），可以包含扩展名
@@ -123,6 +129,11 @@ def rename_file(file_path: str, new_name: str) -> bool:
         dir_name = os.path.dirname(file_path)
         new_path = os.path.join(dir_name, new_name)
 
+        # 针对目标重命名路径进行黑名单二次安全校验
+        is_safe, deny_msg = security_proxy.verify_path_permission(new_path)
+        if not is_safe:
+            return deny_msg
+        
         os.rename(file_path, new_path)
         sys_logger.info(f"[工具执行] 重命名成功：{file_path} -> {new_path}")
         return True
@@ -131,62 +142,42 @@ def rename_file(file_path: str, new_name: str) -> bool:
         return False
 
 
-def query_csv(file_path: str, query_string: str) -> str:
+@security_guard
+def query_csv(file_path: str, query_string: str) -> dict:
     """
     专门用于查询大型 CSV 文件的数据过滤工具。
     【大模型注意】
     1. 必须用 Pandas 的 query 语法编写 query_string。
     2. 请严格使用 CSV 的真实列名（通常是英文，如 time, air_temperature）。
     """
+    level = detect_security_level(file_path)
     sys_logger.info(f"[工具执行] 正在查询 CSV: {file_path} | 条件: {query_string}")
 
     if not os.path.exists(file_path):
-        msg = f"错误: 找不到文件 {file_path}"
-        sys_logger.error(msg)
-        return msg
+        return {"content": f"错误: 找不到文件 {file_path}", "security_level": "L4", "file_path": file_path}
     if os.path.isdir(file_path):
-        msg = f"错误: {file_path} 是文件夹，不是 CSV 文件。请停止把文件夹当作 CSV 查询，并向用户确认具体文件路径。"
-        sys_logger.error(msg)
-        return msg
+        return {"content": f"错误: {file_path} 是文件夹，不是 CSV 文件。", "security_level": "L4", "file_path": file_path}
 
     try:
-        # 1. 读取 CSV (消除警告)
         df = pd.read_csv(filepath_or_buffer=file_path)
-
         if not isinstance(df, pd.DataFrame):
-            msg = "错误: 读取的结果不是有效的 DataFrame"
-            sys_logger.error(msg)
-            return msg
+            return {"content": "错误: 读取的结果不是有效的 DataFrame", "security_level": "L4", "file_path": file_path}
 
-        # 2. 执行大模型写好的查询语句
         result_df = df.query(query_string)
-
-        # 🌟 查不到数据时的“格式纠偏”
         if result_df.empty:
             cols = df.columns.tolist()
-            sample_data = df.iloc[0].to_dict() if not df.empty else "无数据"
+            return {"content": f"⚠️ 查询结果为空！请核对列名: {cols}", "security_level": "L4", "file_path": file_path}
 
-            sys_logger.warning(
-                f"⚠️ 查询执行成功，但结果为空！\n这通常是因为你的 query_string (特别是时间格式) 与 CSV 的实际文本不匹配。\n请看一眼 CSV 真实的列名和第一条数据的格式，然后修改你的条件重试！\n-> 真实列名: {cols}\n-> 真实数据示例: {sample_data}")
-
-            return (f"⚠️ 查询执行成功，但结果为空！\n"
-                    f"这通常是因为你的 query_string (特别是时间格式) 与 CSV 的实际文本不匹配。\n"
-                    f"请看一眼 CSV 真实的列名和第一条数据的格式，然后修改你的条件重试！\n"
-                    f"-> 真实列名: {cols}\n"
-                    f"-> 真实数据示例: {sample_data}")
-
-        # 3. 正常返回 JSON 字符串
         json_result = str(result_df.to_json(orient="records", force_ascii=False))
         sys_logger.info(f"[工具执行] CSV查询成功，返回了 {len(result_df)} 条数据。")
-        return json_result
+
+        # 🌟 返回标准载荷字典，由 @security_guard 切面拦截清洗
+        return {"content": json_result, "security_level": level, "file_path": file_path}
 
     except Exception as e:
-        # 🌟 核心升级 2：语法报错时的“列名纠偏”
         cols = df.columns.tolist() if 'df' in locals() else "未知"
-        sys_logger.error(f"查询语法报错！错误信息: {str(e)}\n")
-        return (f"查询语法报错！错误信息: {str(e)}\n这通常是因为你使用了不存在的列名（比如用了中文'时间'，但实际是'time'）。\n请使用真实的列名重新查询: {cols}"
-                f"这通常是因为你使用了不存在的列名（比如用了中文'时间'，但实际是'time'）。\n"
-                f"请使用真实的列名重新查询: {cols}")
+        err_msg = f"查询语法报错: {str(e)}。当前列名: {cols}"
+        return {"content": err_msg, "security_level": "L4", "file_path": file_path}
 
 
 # ==========================================
@@ -230,13 +221,15 @@ def submit_sensor_record(
 # ==========================================
 # 🌟 学术论文 Word 文本提取器
 # ==========================================
-def read_docx_file(file_path: str) -> str:
+@security_guard
+def read_docx_file(file_path: str) -> dict:
     """
     读取本地 .docx 格式的论文手稿文件，并将其中的段落和表格文字完整提取为纯文本。
 
     参数:
     - file_path: 本地 Word 文件的路径（例如：'test2/Manuscript.docx'）
     """
+    level = detect_security_level(file_path)
     try:
         doc = docx.Document(file_path)
         full_text = []
@@ -255,17 +248,16 @@ def read_docx_file(file_path: str) -> str:
                     full_text.append(" [表格数据] " + " | ".join(row_text))
 
         if not full_text:
-            sys_logger.warning(f"⚠️ 读取了 {file_path}，但未发现有效内容。")
-            return "⚠️ 读取成功，但未在文档中发现有效的文本内容。"
+            return {"content": "⚠️ 未在文档中发现有效的文本内容。", "security_level": "L4", "file_path": file_path}
 
         # 把所有文本用换行符连起来，变成大模型能读懂的长文章
         result_txt = "\n".join(full_text)
         sys_logger.info(f"[工具执行] 成功读取 DOCX 文件: {file_path} (解析出 {len(result_txt)} 字符)")
-        return result_txt
+        return {"content": result_txt, "security_level": level, "file_path": file_path}
 
     except Exception as e:
         sys_logger.error(f"读取 .docx 文件失败，原因: {str(e)}")
-        return f"读取 .docx 文件失败，原因: {str(e)}"
+        return {"content": f"读取 .docx 文件失败: {str(e)}", "security_level": "L4", "file_path": file_path}
 
 
 # ==========================================
@@ -417,7 +409,12 @@ def search_past_experience(
         lines.append("==================================================")
 
         sys_logger.info(f"🔍 [冷路径召回] 成功按语义在冷库中检索到 {len(docs)} 条历史卡片。")
-        return "\n".join(lines)
+        raw_result_text = "\n".join(lines)
+        # -------------------------------------------------------------
+        # 冷库卡片发往大模型前统一脱敏
+        # 即使卡片在 ChromaDB 中记录的是真实的 A63、9号窟，交还大模型时自动变成代号
+        # -------------------------------------------------------------
+        return security_proxy.mask_user_input(raw_result_text)
 
     except Exception as e:
         sys_logger.error(f"❌ [冷库检索异常] {e}")
@@ -454,7 +451,12 @@ def get_experience_detail_by_id(episode_id: str) -> str:
             f"• 完整密集总结:\n  {doc}",
             "=================================================="
         ]
-        return "\n".join(detail_lines)
+        raw_detail_text = "\n".join(detail_lines)
+
+        # -------------------------------------------------------------
+        # 🌟 穿透详情发往大模型前同样强制脱敏
+        # -------------------------------------------------------------
+        return security_proxy.mask_user_input(raw_detail_text)
 
     except Exception as e:
         sys_logger.error(f"❌ [穿透详情异常] {e}")

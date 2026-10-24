@@ -23,7 +23,7 @@ from agent.agent_engine_2 import UniversalPlanExecuteEngine
 
 from agent.llm_factory import get_llm_model
 from utils.memory_manager import FactStore
-from utils.core_utils import load_prompt
+from utils.core_utils import load_prompt, security_proxy
 from RAG.document_parser import read_any_file
 from utils.logger_print import sys_logger
 
@@ -38,10 +38,14 @@ def make_mcp_tool(session: ClientSession):
     """闭包工厂：接收一个 session，返回一个绑定好的工具调用网关"""
     @traceable(name="MCP_远程工具调用")
     async def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
-        sys_logger.info(f"[远程调用] 正在请求 Server 执行工具: {tool_name} | 传入参数: {arguments}")
+        # 智能解密：若本轮有脱敏 (has_masked_in_turn==True)，将代号文件名还原为真实文件名
+        # 若无脱敏，网关内部瞬间 O(1) 放行
+        actual_arguments = security_proxy.demask_tool_arguments(arguments)
+
+        sys_logger.info(f"[远程调用] 正在请求 Server 执行工具: {tool_name} | 传入参数: {actual_arguments}")
 
         try:
-            result = await session.call_tool(tool_name, arguments)
+            result = await session.call_tool(tool_name, actual_arguments)
             text_result = [content.text for content in result.content if content.type == "text"]
             final_result = "\n".join(text_result)
 
@@ -215,24 +219,39 @@ async def build_agent_with_mcp(session: ClientSession,
         if not memory_manager:
             return ""
 
+        raw_memory_context = ""
+
         # 方式 A：如果传入的是统一记忆总管 (UnifiedMemoryManager)，直接调用封装接口
         if hasattr(memory_manager, "get_system_prompt_injection"):
-            return memory_manager.get_system_prompt_injection()
+            raw_memory_context = memory_manager.get_system_prompt_injection()
 
         # 方式 B：防御性兼容（若调用方传入的是分散的旧版实例）
-        blocks = []
-        if fact_store:
-            facts_str = fact_store.get_formatted_facts()
-            if facts_str:
-                blocks.append(facts_str)
+        else:
+            blocks = []
+            if fact_store:
+                facts_str = fact_store.get_formatted_facts()
+                if facts_str:
+                    blocks.append(facts_str)
 
-        if hasattr(memory_manager, "current_summary") and memory_manager.current_summary:
-            blocks.append(f"📌【前情提要 / 历史关键脉络摘要】：\n{memory_manager.current_summary}")
+            if hasattr(memory_manager, "current_summary") and memory_manager.current_summary:
+                blocks.append(f"📌【前情提要 / 历史关键脉络摘要】：\n{memory_manager.current_summary}")
 
-        if blocks:
-            sep = "=" * 55
-            return f"\n\n{sep}\n" + "\n\n".join(blocks) + f"\n{sep}\n"
-        return ""
+            if blocks:
+                sep = "=" * 55
+                raw_memory_context = f"\n\n{sep}\n" + "\n\n".join(blocks) + f"\n{sep}\n"
+
+        if not raw_memory_context:
+            return ""
+
+        # -----------------------------------------------------------------
+        # 核心拦截判定：严格根据 security_proxy.is_enabled 开关执行脱敏
+        # -----------------------------------------------------------------
+        if security_proxy.is_enabled:
+            # 开启时：执行可逆脱敏，并把网关污点标记 has_masked_in_turn 置为 True
+            return security_proxy.mask_user_input(raw_memory_context)
+        else:
+            # 关闭时：原样明文返回，绝不脱敏
+            return raw_memory_context
 
     sys_logger.info(f"🚀 [Agent组装完毕] 引擎挂载成功，即将进入对话循环。")
 

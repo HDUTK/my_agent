@@ -30,9 +30,8 @@ from mcp.client.session import ClientSession
 
 # 统一记忆门面总管（一行代码涵盖门禁、裁剪、排雷、摘要与事实落盘）
 from utils.memory_manager import UnifiedMemoryManager
-
-# 导入在线记录器
-from utils.session_recorder import SessionRecorder
+# 清洗与还原工具
+from utils.core_utils import security_proxy
 
 # 导入其他的模块
 from agent.agent_builder import build_agent_with_mcp
@@ -85,11 +84,15 @@ tracer = trace.get_tracer(__name__)
 # 🌟 将“单次回合”的逻辑单独抽离，并打上摄像头
 @traceable(name="Agent_单回合对话_Turn")  # langSmith
 async def process_single_turn(agent: Agent, user_input: str, history: list) -> list:
-    """处理单次对话回合，并返回更新后的记忆"""
+    """处理单次对话回合，当场执行本地反向还原，并返回更新后的记忆"""
     # 🌟 核心修改：用 OTel 创建单回合根节点 (Root Span)，将该回合的所有操作聚合为一棵树
     with tracer.start_as_current_span("Agent_单回合对话_Turn") as root_span:
         # 将用户输入写入 Span 属性
         root_span.set_attribute("input.value", user_input)
+
+        # 用户输入前置脱敏
+        # 若包含 A63，替换为【测点_A63】并把 has_masked_in_turn 设为 True；否则原样放行
+        masked_user_input = security_proxy.mask_user_input(user_input)
 
         print_and_log("🤖 思考中...\n回答: ", "info", end="", flush=True)
 
@@ -97,7 +100,7 @@ async def process_single_turn(agent: Agent, user_input: str, history: list) -> l
             # 🌟 把 run() 换成 run_stream()，用 async with 打开“水龙头”
             # 🌟 核心控制：传入 model_settings，限制 max_tokens
             async with agent.run_stream(
-                    user_input,
+                    masked_user_input,
                     message_history=history,
                     model_settings=ModelSettings(max_tokens=LLM_CONFIG["input_max_tokens"]),
                     usage_limits=UsageLimits(request_limit=8, tool_calls_limit=5)
@@ -111,9 +114,12 @@ async def process_single_turn(agent: Agent, user_input: str, history: list) -> l
                     content_chunks.append(text_chunk)
                 print()  # 打印换行收尾
 
-                # 🌟 必须等文字全部流完，再结算并打印聊天 Token 消耗
-                full_reply = "".join(content_chunks)
-                sys_logger.info(f"[对话记录] 用户输入: {user_input}\n[Agent完整回复]: \n{full_reply}")
+                # 必须等文字全部流完，拼接后当场还原真实实体，再结算并打印聊天 Token 消耗
+                raw_reply = "".join(content_chunks)
+                # 当场反向还原
+                # 若本轮 has_masked_in_turn == False，demask_response 会瞬间原样返回，0 毫秒开销！
+                full_reply = security_proxy.demask_response(raw_reply)
+                sys_logger.info(f"[对话记录] 用户输入: {user_input}\n[Agent完整回复(已还原真实实体)]: \n{full_reply}")
 
                 usage = resp.usage
                 token_msg = f"📊 [Token结算 - 聊天界面] 输入: {usage.input_tokens} | 输出: {usage.output_tokens} | 累计: {usage.total_tokens}"
@@ -178,7 +184,10 @@ async def run_chat_loop(agent: Agent, memory_mgr: UnifiedMemoryManager):
         if not cleaned_input.strip():
             continue
 
-        # 🌟【核心简化点】：1 行代码解决所有门禁、抽取、排雷、剪枝与滚动摘要
+        # 核心状态管理：每轮交互启动前，重置网关状态 (has_masked_in_turn = False)
+        security_proxy.reset_turn_state()
+
+        # 🌟 1 行代码解决所有门禁、抽取、排雷、剪枝与滚动摘要
         clean_history = await memory_mgr.prepare_turn_context(cleaned_input, history)
 
         # -----------------------------------------------------------------

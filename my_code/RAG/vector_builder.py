@@ -19,9 +19,8 @@ import shutil
 
 from config.system_config import DB_PERSIST_PATH, COLLECTION_NAME, DEVICE
 from config.agent_config import MODEL_REGISTRY
-from utils.core_utils import apply_model_environment
+from utils.core_utils import apply_model_environment, detect_security_level
 from utils.logger_print import print_and_log
-
 
 # 读取bge_m3模型的配置
 apply_model_environment(MODEL_REGISTRY['bge_m3']['model_name_simple'])
@@ -153,6 +152,7 @@ def save_chunks_to_chroma(chunks: list[Document], embeddings=None):
     """
     将切分好的纸条 (Chunks) 连同它们的标签 (Metadata) 一起变成坐标，存入指定路径的 ChromaDB
     支持接收外部预热好的 embeddings 实例，避免重复创建连接。
+    入库时自动通过文件所在路径识别并打上 security_level (L0, L2, L4, L6) 密级标签！
     """
     if not chunks:
         print_and_log("⚠️ 传入的 Chunks 为空，无法入库。", "warning")
@@ -167,28 +167,18 @@ def save_chunks_to_chroma(chunks: list[Document], embeddings=None):
     seen_ids = set()
     filtered_empty_count = 0
 
-    # # 🌟 批量为所有纸条生成固定的数字指纹 ID
-    # chunk_ids = [generate_chunk_id(chunk) for chunk in chunks]
-    # print_and_log(f"🔑 已生成固定唯一哈希 ID，启动防重复入库 (Upsert 机制)...", "info")
-    #
-    # # 1. 获取常驻的 Chroma 客户端
-    # vector_db = get_chroma_db(embeddings=embeddings)
-    #
-    # # 2. 核心入库指令！
-    # # Chroma.from_documents 会做两件事：
-    # # ① 遍历所有的 chunk，让 BGE 模型把文字算成向量。
-    # # ② 把文字、标签、向量打包存入 persist_directory 指定的本地文件夹中。
-    # # 调用 add_documents 增量追加，不重建客户端
-    # vector_db.add_documents(documents=chunks, ids=chunk_ids)
-    #
-    # print_and_log("🎉 恭喜！所有数据已成功向量化并持久化入库！", "info")
-    # return vector_db
-
     for chunk in chunks:
         # 1. 过滤纯空白或换行符构成的无意义脏切片
         if not chunk.page_content or not chunk.page_content.strip():
             filtered_empty_count += 1
             continue
+
+        # -------------------------------------------------------------
+        # 🌟 自动根据切片来源路径打上密级 (L0 / L2 / L4 / L6)
+        # -------------------------------------------------------------
+        source_path = chunk.metadata.get('source', '')
+        detected_level = detect_security_level(source_path)
+        chunk.metadata["security_level"] = detected_level  # 写入 ChromaDB 元数据
 
         chunk_id = generate_chunk_id(chunk)
 
